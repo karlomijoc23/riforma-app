@@ -1,0 +1,13 @@
+/opt/riforma/logs/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 0640 riforma riforma
+    sharedscripts
+    postrotate
+        systemctl reload riforma-backend 2>/dev/null || true
+    endscript
+}

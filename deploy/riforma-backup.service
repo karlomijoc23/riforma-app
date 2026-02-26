@@ -1,0 +1,7 @@
+[Unit]
+Description=Riforma Database Backup
+
+[Service]
+Type=oneshot
+User=riforma
+ExecStart=/opt/riforma/scripts/backup-db.sh

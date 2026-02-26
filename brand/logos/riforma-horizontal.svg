@@ -1,0 +1,18 @@
+<svg width="720" height="220" viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title>Riforma horizontal logo</title>
+  <desc>Gradient monogram with riforma wordmark.</desc>
+  <defs>
+    <linearGradient id="riformaGradient" x1="76" y1="32" x2="284" y2="220" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6ED1A7"/>
+      <stop offset="42%" stop-color="#2EB28E"/>
+      <stop offset="100%" stop-color="#0C5D49"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(20,12) scale(0.36)">
+    <path fill="url(#riformaGradient)"
+          d="M152 88h132c100 0 180 68 180 168 0 82-48 140-122 158l102 140H336l-92-128h-64v128H152zm132 85h-64v146h64c48 0 78-28 78-73s-30-73-78-73z"/>
+  </g>
+  <g transform="translate(260,148)">
+    <text x="0" y="0" font-family="Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, Cantarell, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif" font-size="120" font-weight="600" letter-spacing="-3" fill="#0B5A46">riforma</text>
+  </g>
+</svg>

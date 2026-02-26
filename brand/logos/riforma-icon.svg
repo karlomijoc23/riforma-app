@@ -1,0 +1,13 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title>Riforma mark</title>
+  <desc>Rounded monogram "R" in gradient teal-to-emerald.</desc>
+  <defs>
+    <linearGradient id="riformaGradient" x1="92" y1="72" x2="420" y2="440" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6ED1A7"/>
+      <stop offset="45%" stop-color="#2EB28E"/>
+      <stop offset="100%" stop-color="#0C5D49"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#riformaGradient)"
+        d="M152 88h132c100 0 180 68 180 168 0 82-48 140-122 158l102 140H336l-92-128h-64v128H152zm132 85h-64v146h64c48 0 78-28 78-73s-30-73-78-73z"/>
+</svg>

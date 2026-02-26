@@ -1,0 +1,138 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family:
+    "Inter",
+    "General Sans",
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Roboto",
+    "Oxygen",
+    "Ubuntu",
+    "Cantarell",
+    "Fira Sans",
+    "Droid Sans",
+    "Helvetica Neue",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f4f8f6;
+  color: #0e1116;
+}
+
+code {
+  font-family:
+    source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+@layer base {
+  :root {
+    --background: 161 24% 97%;
+    --foreground: 217 22% 7%;
+    --card: 0 0% 100%;
+    --card-foreground: 217 22% 7%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 217 22% 7%;
+    --primary: 167 72% 21%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 164 30% 92%;
+    --secondary-foreground: 167 45% 24%;
+    --muted: 164 32% 88%;
+    --muted-foreground: 167 28% 38%;
+    --accent: 163 100% 38%;
+    --accent-foreground: 217 22% 7%;
+    --destructive: 2 85% 57%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 167 35% 80%;
+    --input: 167 35% 80%;
+    --ring: 163 100% 38%;
+    --chart-1: 167 72% 21%;
+    --chart-2: 163 100% 38%;
+    --chart-3: 167 45% 55%;
+    --chart-4: 34 88% 61%;
+    --chart-5: 210 10% 25%;
+    --radius: 0.75rem;
+  }
+  .dark {
+    --background: 167 50% 8%;
+    --foreground: 0 0% 100%;
+    --card: 167 44% 12%;
+    --card-foreground: 161 30% 92%;
+    --popover: 167 44% 12%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 163 100% 38%;
+    --primary-foreground: 167 72% 21%;
+    --secondary: 169 27% 18%;
+    --secondary-foreground: 161 30% 92%;
+    --muted: 169 27% 18%;
+    --muted-foreground: 160 20% 75%;
+    --accent: 163 100% 38%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 358 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 167 40% 24%;
+    --input: 167 40% 24%;
+    --ring: 163 100% 38%;
+    --chart-1: 163 100% 38%;
+    --chart-2: 167 72% 21%;
+    --chart-3: 34 88% 61%;
+    --chart-4: 210 10% 25%;
+    --chart-5: 40 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings:
+      "ss01" on,
+      "liga" on;
+  }
+
+  .shadow-shell {
+    box-shadow:
+      0 1px 2px 0 rgb(0 0 0 / 0.05),
+      0 4px 6px -1px rgb(0 0 0 / 0.02),
+      0 2px 4px -1px rgb(0 0 0 / 0.02);
+  }
+
+  .card-hover {
+    @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-lg;
+  }
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s ease-out forwards;
+}

@@ -1,0 +1,12 @@
+{
+  "buildCommand": "corepack yarn --cwd frontend install && corepack yarn --cwd frontend build",
+  "outputDirectory": "frontend/build",
+  "framework": null,
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://riforma-backend.onrender.com/api/$1"
+    }
+  ]
+}

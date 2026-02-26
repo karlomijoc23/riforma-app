@@ -1,0 +1,211 @@
+{
+  "ugovor": {
+    "requireProperty": true,
+    "requireTenant": true,
+    "requireContract": false,
+    "allowPropertyUnit": true,
+    "metaFields": [
+      {
+        "id": "broj_ugovora",
+        "label": "Broj ugovora",
+        "type": "text",
+        "required": false,
+        "placeholder": "UG-2024-01"
+      },
+      {
+        "id": "datum_potpisivanja",
+        "label": "Datum potpisivanja",
+        "type": "date",
+        "required": false
+      }
+    ],
+    "infoHint": "Ugovor zahtijeva povezivanje s nekretninom i zakupnikom. Možete priložiti postojeći ili novi ugovor."
+  },
+  "aneks": {
+    "requireProperty": true,
+    "requireTenant": true,
+    "requireContract": true,
+    "allowPropertyUnit": true,
+    "metaFields": [
+      {
+        "id": "broj_aneksa",
+        "label": "Broj aneksa",
+        "type": "text",
+        "required": false,
+        "placeholder": "AN-2024-01"
+      }
+    ],
+    "infoHint": "Aneks se uvijek veže uz postojeći ugovor i zahtijeva povezivanje s odgovarajućim zakupnikom."
+  },
+  "racun": {
+    "requireProperty": true,
+    "requireTenant": true,
+    "requireContract": true,
+    "allowPropertyUnit": true,
+    "metaFields": [
+      {
+        "id": "broj_racuna",
+        "label": "Broj računa",
+        "type": "text",
+        "required": true,
+        "placeholder": "R-2024-015"
+      },
+      {
+        "id": "datum_racuna",
+        "label": "Datum računa",
+        "type": "date",
+        "required": true
+      },
+      {
+        "id": "iznos",
+        "label": "Iznos (EUR)",
+        "type": "number",
+        "required": false
+      }
+    ],
+    "infoHint": "Račun mora biti povezan s aktivnim ugovorom i zakupnikom radi praćenja troškova."
+  },
+  "gradevinska_dozvola": {
+    "requireProperty": true,
+    "requireTenant": false,
+    "requireContract": false,
+    "allowContract": false,
+    "allowTenant": false,
+    "allowPropertyUnit": false,
+    "metaFields": [
+      {
+        "id": "broj_dozvole",
+        "label": "Broj dozvole",
+        "type": "text",
+        "required": true,
+        "placeholder": "GĐ-123-2024"
+      },
+      {
+        "id": "izdavatelj",
+        "label": "Izdavatelj",
+        "type": "text",
+        "required": false
+      },
+      {
+        "id": "datum_izdavanja",
+        "label": "Datum izdavanja",
+        "type": "date",
+        "required": false
+      }
+    ],
+    "infoHint": "Građevinska dozvola se veže isključivo uz nekretninu. Povezivanje sa zakupnikom ili ugovorom nije dostupno."
+  },
+  "uporabna_dozvola": {
+    "requireProperty": true,
+    "allowTenant": false,
+    "allowContract": false,
+    "allowPropertyUnit": false,
+    "metaFields": [
+      {
+        "id": "broj_dozvole",
+        "label": "Broj dozvole",
+        "type": "text",
+        "required": true
+      },
+      {
+        "id": "datum_izdavanja",
+        "label": "Datum izdavanja",
+        "type": "date",
+        "required": false
+      }
+    ],
+    "infoHint": "Uporabna dozvola zahtijeva povezivanje s nekretninom kako bi se mogla provjeriti važeća dokumentacija."
+  },
+  "energetski_certifikat": {
+    "requireProperty": true,
+    "allowTenant": false,
+    "allowContract": false,
+    "allowPropertyUnit": false,
+    "metaFields": [
+      {
+        "id": "klasa",
+        "label": "Energetski razred",
+        "type": "text",
+        "required": false,
+        "placeholder": "A+, A, B..."
+      },
+      {
+        "id": "datum_vazenja",
+        "label": "Vrijedi do",
+        "type": "date",
+        "required": false
+      }
+    ],
+    "infoHint": "Energetski certifikat se odnosi na nekretninu i omogućuje praćenje isteka valjanosti."
+  },
+  "zemljisnoknjizni_izvadak": {
+    "requireProperty": true,
+    "allowTenant": false,
+    "allowContract": false,
+    "allowPropertyUnit": false,
+    "metaFields": [],
+    "infoHint": "Zemljišnoknjižni izvadak služi kao dokaz vlasništva i veže se samo uz nekretninu."
+  },
+  "procjena_vrijednosti": {
+    "requireProperty": true,
+    "allowTenant": false,
+    "allowContract": false,
+    "allowPropertyUnit": false,
+    "metaFields": [
+      {
+        "id": "procjenitelj",
+        "label": "Procjenitelj",
+        "type": "text"
+      },
+      {
+        "id": "datum_procjene",
+        "label": "Datum procjene",
+        "type": "date"
+      }
+    ],
+    "infoHint": "Procjena vrijednosti je interna dokumentacija vezana uz konkretnu nekretninu."
+  },
+  "lokacijska_informacija": {
+    "requireProperty": true,
+    "allowTenant": false,
+    "allowContract": false,
+    "allowPropertyUnit": false,
+    "metaFields": [],
+    "infoHint": "Lokacijska informacija koristi se u procesu razvoja nekretnine i veže se samo uz lokaciju."
+  },
+  "osiguranje": {
+    "requireProperty": true,
+    "requireTenant": false,
+    "requireContract": false,
+    "allowTenant": true,
+    "allowContract": true,
+    "allowPropertyUnit": true,
+    "metaFields": [
+      {
+        "id": "broj_polis",
+        "label": "Broj police",
+        "type": "text",
+        "required": false
+      },
+      {
+        "id": "osiguravatelj",
+        "label": "Osiguravatelj",
+        "type": "text",
+        "required": false
+      }
+    ],
+    "infoHint": "Polica osiguranja može biti vezana uz nekretninu i/ili zakupnika ovisno o pokriću."
+  },
+  "izvadak_iz_registra": {
+    "requireTenant": true,
+    "allowContract": false,
+    "allowPropertyUnit": false,
+    "infoHint": "Izvadak iz registra odnosi se na pravnu osobu ili zakupnika."
+  },
+  "bon_2": {
+    "requireTenant": true,
+    "allowContract": false,
+    "allowPropertyUnit": false,
+    "infoHint": "BON-2 se odnosi na zakupnika i služi za provjeru boniteta."
+  }
+}

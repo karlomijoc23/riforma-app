@@ -1,0 +1,5 @@
+test_reports/
+test_result.md
+backend.log
+frontend.log
+uvicorn.log

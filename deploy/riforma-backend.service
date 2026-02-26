@@ -1,0 +1,35 @@
+[Unit]
+Description=Riforma Backend (FastAPI/Uvicorn)
+After=network.target mariadb.service
+Wants=mariadb.service
+
+[Service]
+Type=simple
+User=riforma
+Group=riforma
+WorkingDirectory=/opt/riforma/backend
+EnvironmentFile=/opt/riforma/.env
+ExecStart=/opt/riforma/backend/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --access-log \
+    --log-level info
+Restart=always
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/riforma/backend/uploads /opt/riforma/logs
+PrivateTmp=true
+
+# Logging
+StandardOutput=append:/opt/riforma/logs/backend.log
+StandardError=append:/opt/riforma/logs/backend-error.log
+
+[Install]
+WantedBy=multi-user.target

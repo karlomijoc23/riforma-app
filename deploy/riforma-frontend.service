@@ -1,0 +1,16 @@
+[Unit]
+Description=Riforma Frontend (Apache2)
+After=network.target riforma-backend.service
+
+[Service]
+Type=forking
+PIDFile=/run/apache2/apache2.pid
+ExecStartPre=/usr/sbin/apachectl configtest
+ExecStart=/usr/sbin/apachectl start
+ExecReload=/usr/sbin/apachectl graceful
+ExecStop=/usr/sbin/apachectl stop
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

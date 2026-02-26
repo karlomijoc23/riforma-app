@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="hr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Aneks ugovora</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --brand-primary: #1d3557;
+        --brand-accent: #457b9d;
+        --text-color: #1c1c1c;
+        --muted-color: #6c757d;
+        --border-color: #dfe6ed;
+        --spacing: 24px;
+        --font-base: 'Helvetica', Arial, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 48px 56px 60px;
+        font-family: var(--font-base);
+        color: var(--text-color);
+        line-height: 1.6;
+        background: #ffffff;
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        border-bottom: 2px solid var(--brand-primary);
+        padding-bottom: 14px;
+        margin-bottom: 32px;
+      }
+
+      .brand-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .brand-name {
+        font-weight: 700;
+        font-size: 20px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--brand-primary);
+      }
+
+      .brand-subtitle {
+        font-size: 11px;
+        color: var(--muted-color);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .document-meta {
+        text-align: right;
+        font-size: 11px;
+        color: var(--muted-color);
+      }
+
+      h1 {
+        font-size: 24px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin: 0 0 8px;
+        color: var(--brand-primary);
+      }
+
+      .intro {
+        font-size: 13px;
+        color: var(--muted-color);
+        margin-bottom: 28px;
+      }
+
+      .section {
+        margin-top: var(--spacing);
+      }
+
+      .section__title {
+        font-size: 13px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin: 0 0 12px;
+        color: var(--brand-accent);
+      }
+
+      .section__content p {
+        margin: 0 0 8px;
+      }
+
+      .section__content ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .section__content li {
+        margin-bottom: 6px;
+      }
+
+      .signature-block {
+        display: flex;
+        justify-content: space-between;
+        gap: 48px;
+        margin-top: 56px;
+      }
+
+      .signature {
+        flex: 1;
+        text-align: center;
+        font-size: 12px;
+      }
+
+      .signature::before {
+        content: '';
+        display: block;
+        height: 56px;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 10px;
+      }
+
+      footer {
+        margin-top: 64px;
+        font-size: 10px;
+        color: var(--muted-color);
+        border-top: 1px solid var(--border-color);
+        padding-top: 12px;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--brand-accent);
+        color: var(--brand-accent);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand-block">
+        <div class="brand-name">{{BRAND_NAME}}</div>
+        <div class="brand-subtitle">{{BRAND_SUBTITLE}}</div>
+      </div>
+      <div class="document-meta">
+        <div class="badge">Aneks ugovora</div>
+        <div>Generirano: {{GENERATED_AT}}</div>
+        <div>Referenca ugovora: {{CONTRACT_REFERENCE}}</div>
+      </div>
+    </header>
+
+    <main>
+      <h1>{{TITLE}}</h1>
+      <p class="intro">{{INTRO}}</p>
+
+      <section class="section">
+        <h2 class="section__title">Sažetak izvornog ugovora</h2>
+        <div class="section__content">{{CONTRACT_SUMMARY}}</div>
+      </section>
+
+      <section class="section">
+        <h2 class="section__title">Nekretnina</h2>
+        <div class="section__content">{{PROPERTY_SUMMARY}}</div>
+      </section>
+
+      <section class="section">
+        <h2 class="section__title">Zakupnik</h2>
+        <div class="section__content">{{TENANT_SUMMARY}}</div>
+      </section>
+
+      <section class="section">
+        <h2 class="section__title">Izmjene i dopune</h2>
+        <div class="section__content">{{CHANGES}}</div>
+      </section>
+
+      <section class="section">
+        <h2 class="section__title">Ključne odredbe</h2>
+        <div class="section__content">{{BODY}}</div>
+      </section>
+
+      <div class="signature-block">
+        <div class="signature">{{LANDLORD_LABEL}}</div>
+        <div class="signature">{{TENANT_LABEL}}</div>
+      </div>
+    </main>
+
+    <footer>
+      {{FOOTER}}
+    </footer>
+  </body>
+</html>
