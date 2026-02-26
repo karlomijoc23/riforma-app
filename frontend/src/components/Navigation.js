@@ -7,8 +7,7 @@ import {
   Calendar,
   Wrench,
   Pickaxe,
-  TrendingUp,
-  Truck,
+  Contact,
   Search,
   X,
   Menu,
@@ -172,7 +171,7 @@ export const Navigation = () => {
   const navItems = [
     { path: "/", icon: Home, label: "Dashboard" },
     { path: "/nekretnine", icon: Building, label: "Nekretnine" },
-    { path: "/zakupnici", icon: Users, label: "Zakupnici" },
+    { path: "/kontakti", icon: Contact, label: "Kontakti" },
     {
       path: "/ugovori",
       icon: Calendar,
@@ -181,8 +180,6 @@ export const Navigation = () => {
     },
     { path: "/odrzavanje", icon: Wrench, label: "Održavanje" },
     { path: "/projekti", icon: Pickaxe, label: "Projekti" },
-    { path: "/analiza-cijena", icon: TrendingUp, label: "Cijene" },
-    { path: "/dobavljaci", icon: Truck, label: "Dobavljaci" },
   ];
 
   const renderSearchDropdown = () => {

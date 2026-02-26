@@ -73,7 +73,7 @@ import ZakupnikForm from "./ZakupnikForm";
 import ZakupnikDetails from "./ZakupnikDetails";
 import { useReactToPrint } from "react-to-print";
 
-const ZakupniciPage = () => {
+const ZakupniciPage = ({ embedded = false }) => {
   const navigate = useNavigate();
   const {
     zakupnici,
@@ -269,23 +269,33 @@ const ZakupniciPage = () => {
     setCurrentPage(1);
   };
 
-  return (
-    <div className="mx-auto max-w-7xl px-4 py-8 md:px-6 space-y-8">
-      {/* Header Section */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-primary">
-            Zakupnici
-          </h1>
-          <p className="mt-1 text-muted-foreground">
-            Upravljajte bazom zakupnika i partnera, kontakt podacima i
-            ugovorima.
-          </p>
+  const content = (
+    <>
+      {/* Header (standalone mode only) */}
+      {!embedded && (
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-primary">
+              Zakupnici
+            </h1>
+            <p className="mt-1 text-muted-foreground">
+              Upravljajte bazom zakupnika i partnera, kontakt podacima i
+              ugovorima.
+            </p>
+          </div>
+          <Button onClick={handleCreate} size="lg" className="shadow-sm">
+            <Plus className="mr-2 h-4 w-4" /> Dodaj zakupnika
+          </Button>
         </div>
-        <Button onClick={handleCreate} size="lg" className="shadow-sm">
-          <Plus className="mr-2 h-4 w-4" /> Dodaj zakupnika
-        </Button>
-      </div>
+      )}
+
+      {embedded && (
+        <div className="flex justify-end">
+          <Button onClick={handleCreate} size="lg" className="shadow-sm">
+            <Plus className="mr-2 h-4 w-4" /> Dodaj zakupnika
+          </Button>
+        </div>
+      )}
 
       {/* Filters Section */}
       <div className="space-y-3 bg-muted/30 p-4 rounded-lg border border-border/50">
@@ -688,6 +698,14 @@ const ZakupniciPage = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  );
+
+  if (embedded) return <div className="space-y-6">{content}</div>;
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-8 md:px-6 space-y-8">
+      {content}
     </div>
   );
 };

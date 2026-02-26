@@ -744,7 +744,7 @@ async def submit_for_approval(
             ),
         )
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
 
     # All submissions go to pending — approval is always explicit
     update_fields: Dict[str, Any] = {
@@ -812,7 +812,7 @@ async def approve_contract(
                     exclude_contract_id=id,
                 )
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     update_fields: Dict[str, Any] = {
         "approval_status": ApprovalStatus.APPROVED.value,
         "approved_by": current_user["id"],
@@ -869,7 +869,7 @@ async def reject_contract(
             detail="Komentar je obavezan pri odbijanju ugovora.",
         )
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     update_fields: Dict[str, Any] = {
         "approval_status": ApprovalStatus.REJECTED.value,
         "approved_by": current_user["id"],

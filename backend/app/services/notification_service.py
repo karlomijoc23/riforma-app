@@ -204,11 +204,9 @@ async def notify_overdue_bills():
 
 async def notify_maintenance_overdue():
     """Send notifications for overdue maintenance tasks."""
-    today_str = date.today().isoformat()
-
     overdue = await maintenance_tasks.find_all(extra_conditions=[
-        MaintenanceTaskRow.status.in_(["open", "in_progress"]),
-        MaintenanceTaskRow.due_date < today_str,
+        MaintenanceTaskRow.status.in_(["novi", "u_tijeku", "planiran"]),
+        MaintenanceTaskRow.rok < date.today(),
     ])
 
     if not overdue:
@@ -234,10 +232,10 @@ async def notify_maintenance_overdue():
 
         tasks_html = ""
         for t in overdue:
-            prio = _prio_map.get(t.priority or "", "[ ]")
-            title = escape(str(t.title or "N/A"))
-            due = escape(str(t.due_date) if t.due_date else "N/A")
-            assigned = escape(str(t.assigned_to or "N/A"))
+            prio = _prio_map.get(t.prioritet or "", "[ ]")
+            title = escape(str(t.naziv or "N/A"))
+            due = escape(str(t.rok) if t.rok else "N/A")
+            assigned = escape(str(t.dodijeljeno or "N/A"))
             tasks_html += (
                 f'<tr><td style="{_td_m}">'
                 f"{prio} {title}</td>"

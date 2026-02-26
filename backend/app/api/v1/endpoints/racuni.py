@@ -387,8 +387,8 @@ async def create_racun(
             else None
         ),
         "created_by": current_user["id"],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
     }
 
     # Add approval workflow fields
@@ -601,7 +601,7 @@ async def update_racun(
             raise HTTPException(status_code=422, detail="Nevazeci tip utroska")
 
     if update_dict:
-        update_dict["updated_at"] = datetime.now(timezone.utc).isoformat()
+        update_dict["updated_at"] = datetime.now(timezone.utc)
         updated = await racuni.update_by_id(id, update_dict)
     else:
         updated = item
@@ -632,7 +632,7 @@ async def update_preknjizavanje(
 
     update_dict = {
         "preknjizavanje_status": data.preknjizavanje_status,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc),
     }
     if data.preknjizavanje_napomena is not None:
         update_dict["preknjizavanje_napomena"] = data.preknjizavanje_napomena
@@ -728,7 +728,7 @@ async def record_payment(
         "payments": payments,
         "status_placanja": new_status,
         "total_paid": total_paid,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc),
     })
 
     return racuni.to_dict(updated)
@@ -770,7 +770,7 @@ async def submit_for_approval(
         # Already checked via require_scopes("financials:create"), so this is fine
         pass
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
 
     # All submissions go to pending — approval is always explicit
     update_fields = {
@@ -824,7 +824,7 @@ async def approve_racun(
             detail="Samo racuni sa statusom 'pending_approval' se mogu odobriti",
         )
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     update_fields = {
         "approval_status": ApprovalStatus.APPROVED.value,
         "approved_by": current_user["id"],
@@ -877,7 +877,7 @@ async def reject_racun(
             detail="Komentar je obavezan pri odbijanju racuna",
         )
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     update_fields = {
         "approval_status": ApprovalStatus.REJECTED.value,
         "approved_by": current_user["id"],
@@ -931,7 +931,7 @@ async def withdraw_racun(
         # Already validated via require_scopes("financials:create")
         pass
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     update_fields = {
         "approval_status": ApprovalStatus.DRAFT.value,
         "approved_by": None,

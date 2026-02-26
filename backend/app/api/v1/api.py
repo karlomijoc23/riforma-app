@@ -13,7 +13,6 @@ from app.api.v1.endpoints import (
     maintenance,
     notifications,
     parking,
-    pricing,
     projects,
     properties,
     racuni,
@@ -56,7 +55,6 @@ api_router.include_router(
 api_router.include_router(projects.router, prefix="/projekti", tags=["projects"])
 api_router.include_router(racuni.router, prefix="/racuni", tags=["racuni"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
-api_router.include_router(pricing.router, prefix="/pricing", tags=["pricing"])
 api_router.include_router(export.router, prefix="/export", tags=["export"])
 api_router.include_router(import_data.router, prefix="/import", tags=["import"])
 api_router.include_router(listings.router, prefix="/oglasi", tags=["listings"])

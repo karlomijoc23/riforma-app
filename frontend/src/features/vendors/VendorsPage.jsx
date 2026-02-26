@@ -144,7 +144,7 @@ const INITIAL_FORM = {
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function VendorsPage() {
+export default function VendorsPage({ embedded = false }) {
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -270,23 +270,33 @@ export default function VendorsPage() {
     }
   };
 
-  return (
-    <div className="mx-auto max-w-7xl px-4 py-8 md:px-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-primary">
-            <Truck className="h-7 w-7" />
-            Dobavljaci
-          </h1>
-          <p className="mt-1 text-muted-foreground">
-            Upravljajte popisom dobavljaca i servisera za odrzavanje nekretnina.
-          </p>
+  const content = (
+    <>
+      {/* Header (standalone mode only) */}
+      {!embedded && (
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-primary">
+              <Truck className="h-7 w-7" />
+              Dobavljaci
+            </h1>
+            <p className="mt-1 text-muted-foreground">
+              Upravljajte popisom dobavljaca i servisera za odrzavanje nekretnina.
+            </p>
+          </div>
+          <Button onClick={openCreate} size="lg" className="shadow-sm">
+            <Plus className="mr-2 h-4 w-4" /> Dodaj dobavljaca
+          </Button>
         </div>
-        <Button onClick={openCreate} size="lg" className="shadow-sm">
-          <Plus className="mr-2 h-4 w-4" /> Dodaj dobavljaca
-        </Button>
-      </div>
+      )}
+
+      {embedded && (
+        <div className="flex justify-end">
+          <Button onClick={openCreate} size="lg" className="shadow-sm">
+            <Plus className="mr-2 h-4 w-4" /> Dodaj dobavljaca
+          </Button>
+        </div>
+      )}
 
       {/* Search */}
       <div className="flex items-center gap-4 bg-muted/30 p-4 rounded-lg border border-border/50">
@@ -594,6 +604,14 @@ export default function VendorsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  );
+
+  if (embedded) return <div className="space-y-6">{content}</div>;
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-8 md:px-6 space-y-6">
+      {content}
     </div>
   );
 }

@@ -144,7 +144,7 @@ async def import_zakupnici(
 @router.post(
     "/ugovori",
     dependencies=[
-        Depends(deps.require_scopes("contracts:create")),
+        Depends(deps.require_scopes("leases:create")),
         Depends(deps.require_tenant()),
     ],
 )

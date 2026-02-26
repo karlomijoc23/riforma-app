@@ -38,7 +38,7 @@ async def receive_webhook(
         "data": event.data or {},
         "status": "received",
         "processed": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(timezone.utc),
         "created_by": current_user["id"],
     }
     created = await webhook_events.create(doc)
@@ -51,7 +51,7 @@ async def receive_webhook(
                 racun_id,
                 {
                     "status_placanja": "placeno",
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc),
                 },
             )
             await webhook_events.update_by_id(

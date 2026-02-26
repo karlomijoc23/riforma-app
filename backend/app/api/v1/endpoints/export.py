@@ -129,7 +129,7 @@ async def export_zakupnici(
 @router.get(
     "/ugovori",
     dependencies=[
-        Depends(deps.require_scopes("contracts:read")),
+        Depends(deps.require_scopes("leases:read")),
         Depends(deps.require_tenant()),
     ],
 )
@@ -198,14 +198,14 @@ async def export_maintenance(
     for item in items:
         rows.append(
             [
-                item.title or "",
+                item.naziv or "",
                 item.status or "",
-                item.priority or "",
-                item.due_date or "",
-                item.assigned_to or "",
-                item.estimated_cost or "",
-                item.actual_cost or "",
-                item.description or "",
+                item.prioritet or "",
+                item.rok or "",
+                item.dodijeljeno or "",
+                item.procijenjeni_trosak or "",
+                item.stvarni_trosak or "",
+                item.opis or "",
             ]
         )
     stamp = datetime.now().strftime("%Y%m%d")

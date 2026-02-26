@@ -67,7 +67,7 @@ def _get_anthropic_client() -> "anthropic.Anthropic":
 
 @router.post(
     "/generate-contract-annex",
-    dependencies=[Depends(deps.require_scopes("contracts:update"))],
+    dependencies=[Depends(deps.require_scopes("leases:update"))],
 )
 @limiter.limit("10/minute")
 async def generate_contract_annex(
@@ -142,7 +142,7 @@ async def generate_contract_annex(
 
 @router.post(
     "/parse-pdf-contract",
-    dependencies=[Depends(deps.require_scopes("contracts:create"))],
+    dependencies=[Depends(deps.require_scopes("leases:create"))],
 )
 @limiter.limit("5/minute")
 async def parse_pdf_contract(
@@ -252,12 +252,23 @@ async def parse_pdf_contract(
                 "datum_sklapanja": "YYYY-MM-DD ili null (pretvori iz teksta)",
                 "datum_pocetka": "YYYY-MM-DD ili null (pretvori iz teksta)",
                 "datum_zavrsetka": "YYYY-MM-DD ili null (dodaj trajanje na pocetak)",
+                "trajanje_mjeseci": "number ili null (izracunaj iz datuma ako treba)",
+                "opcija_produljenja": "boolean (true ako ugovor ima opciju produljenja)",
+                "uvjeti_produljenja": "string ili null (opis uvjeta produljenja)",
+                "rok_otkaza_dani": "number ili null (otkazni rok u danima)",
+                "namjena_prostora": "string ili null (namjena - ured, trgovina, ugostiteljstvo...)",
+                "obveze_odrzavanja": "string ili null (tko odrzava sto)",
                 "sazetak": "string (kratki opis bitnih stavki)"
             },
             "financije": {
-                "iznos": "number (samo iznos zakupnine) ili null",
+                "osnovna_zakupnina": "number (mjesecni iznos zakupnine) ili null",
                 "valuta": "string (EUR, USD...)",
-                "depozit": "number (iznos depozita/pologa) ili null"
+                "polog_depozit": "number (iznos depozita/pologa) ili null",
+                "cam_troskovi": "number (zajednicki troskovi odrzavanja) ili null",
+                "garancija": "number (iznos garancije) ili null",
+                "indeksacija": "boolean (true ako ugovor predvida indeksaciju/uskladivanje cijena)",
+                "indeks": "string ili null (vrsta indeksa - CPI, HICP, inflacija...)",
+                "formula_indeksacije": "string ili null (formula ili opis nacina indeksacije)"
             },
             "zakupnik": {
                 "naziv_firme": "string ili null",
@@ -392,7 +403,7 @@ async def parse_pdf_contract(
                 from datetime import timezone as _tz
 
                 new_id = str(_uuid.uuid4())
-                now_iso = _dt.now(_tz.utc).isoformat()
+                now = _dt.now(_tz.utc)
                 new_zakupnik = {
                     "id": new_id,
                     "naziv_firme": zakupnik_data.get("naziv_firme") or "",
@@ -400,9 +411,9 @@ async def parse_pdf_contract(
                     "adresa": zakupnik_data.get("adresa") or "",
                     "kontakt_email": "",
                     "kontakt_telefon": "",
-                    "tip": "tvrtka",
-                    "created_at": now_iso,
-                    "updated_at": now_iso,
+                    "tip": "zakupnik",
+                    "created_at": now,
+                    "updated_at": now,
                 }
                 await zakupnici.create(new_zakupnik)
                 data["zakupnik"]["id"] = new_id

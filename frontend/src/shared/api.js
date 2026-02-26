@@ -316,7 +316,6 @@ export const api = {
     apiClient.post(`${API_ROOT}/units/bulk-update`, payload),
 
   getDashboard: () => apiClient.get(`${API_ROOT}/dashboard`),
-  getPricingAnalytics: () => apiClient.get(`${API_ROOT}/pricing/analytics`),
 
   parsePdfContract: (file) => {
     const formData = new FormData();

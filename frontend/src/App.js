@@ -28,8 +28,8 @@ const Dashboard = React.lazy(
 const NekretninePage = React.lazy(
   () => import("./features/properties/NekretninePage"),
 );
-const ZakupniciPage = React.lazy(
-  () => import("./features/tenants/ZakupniciPage"),
+const KontaktiPage = React.lazy(
+  () => import("./features/kontakti/KontaktiPage"),
 );
 const UgovoriPage = React.lazy(
   () => import("./features/contracts/UgovoriPage"),
@@ -76,8 +76,6 @@ const TenantStatementPage = React.lazy(
 );
 const HelpPage = React.lazy(() => import("./features/help/HelpPage"));
 const OglasiPage = React.lazy(() => import("./features/listings/OglasiPage"));
-const PricingPage = React.lazy(() => import("./features/pricing/PricingPage"));
-const VendorsPage = React.lazy(() => import("./features/vendors/VendorsPage"));
 const ForgotPasswordPage = React.lazy(
   () => import("./features/auth/ForgotPasswordPage"),
 );
@@ -177,10 +175,10 @@ const AppContent = () => {
                 }
               />
               <Route
-                path="/zakupnici"
+                path="/kontakti"
                 element={
                   <PageTransition>
-                    <ZakupniciPage />
+                    <KontaktiPage />
                   </PageTransition>
                 }
               />
@@ -325,14 +323,6 @@ const AppContent = () => {
                 }
               />
               <Route
-                path="/analiza-cijena"
-                element={
-                  <PageTransition>
-                    <PricingPage />
-                  </PageTransition>
-                }
-              />
-              <Route
                 path="/oglasi"
                 element={
                   <PageTransition>
@@ -340,14 +330,8 @@ const AppContent = () => {
                   </PageTransition>
                 }
               />
-              <Route
-                path="/dobavljaci"
-                element={
-                  <PageTransition>
-                    <VendorsPage />
-                  </PageTransition>
-                }
-              />
+              <Route path="/zakupnici" element={<Navigate to="/kontakti" replace />} />
+              <Route path="/dobavljaci" element={<Navigate to="/kontakti?tab=dobavljaci" replace />} />
               <Route path="/login" element={<Navigate to="/" replace />} />
               <Route
                 path="*"

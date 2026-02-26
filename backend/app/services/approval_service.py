@@ -32,7 +32,7 @@ def build_approval_fields_for_create(
     All new entities start as pending_approval regardless of who creates them.
     entity_type: "leases" or "financials"
     """
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
 
     return {
         "approval_status": ApprovalStatus.PENDING_APPROVAL.value,
