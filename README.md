@@ -9,7 +9,7 @@ Platforma za upravljanje nekretninama — FastAPI backend, React 19 frontend, AI
 | Frontend | React 19, Tailwind CSS, Radix UI (Shadcn), Framer Motion  |
 | Backend  | FastAPI, async SQLAlchemy, Pydantic v2                    |
 | Database | MariaDB 11.4 (async via asyncmy)                          |
-| AI       | Anthropic Claude (parsiranje PDF-ova, generiranje aneksa) |
+| AI       | Anthropic Claude (AI Agent chatbot, PDF parsing, aneksi)  |
 | Auth     | JWT httpOnly cookies, CSRF double-submit, rate limiting   |
 | Deploy   | Docker Compose, Nginx, systemd                            |
 
@@ -60,6 +60,7 @@ DB_PASSWORD=<lozinka>
 DB_NAME=riforma
 AUTH_SECRET=<openssl rand -hex 32>
 ANTHROPIC_API_KEY=<tvoj_key>
+CLAUDE_MODEL=claude-sonnet-4-20250514   # optional, default
 BACKEND_CORS_ORIGINS=http://localhost:3000
 SEED_ADMIN_ON_STARTUP=true
 INITIAL_ADMIN_EMAIL=admin@example.com
@@ -77,18 +78,18 @@ backend/app/
   core/                   # config, security, roles, rate limiter
   db/repositories/        # base.py (BaseRepository), repos.py, instance.py
   db/tenant.py            # CURRENT_TENANT_ID ContextVar
-  models/tables.py        # 23 SQLAlchemy ORM models
+  models/tables.py        # 25 SQLAlchemy ORM models
   middleware/              # CSRF protection
-  services/               # business logic (contract status sync)
+  services/               # business logic, agent_service.py (AI agent)
 
-backend/migrations/       # Alembic migrations (001–003)
+backend/migrations/       # Alembic migrations (001–004)
 backend/scripts/          # migrate_data.py, test_migration.sh
 
 frontend/src/
   features/               # auth, contracts, dashboard, documents,
                           # maintenance, projects, properties,
                           # settings, tenants
-  components/             # Navigation, TenantSwitcher, ui/ (Shadcn)
+  components/             # Navigation, TenantSwitcher, AiAgent/, ui/ (Shadcn)
   shared/                 # api.js, auth.js, entityStore.js, formatters.js
 ```
 
@@ -144,6 +145,7 @@ Svaki request salje `X-Tenant-Id` header. Backend izolira podatke po tenantu za:
 | `/api/parking`            | Parking spaces                                   |
 | `/api/projekti`           | Projects (phases, stakeholders, transactions)    |
 | `/api/dashboard`          | Dashboard aggregations                           |
+| `/api/agent`              | AI Agent chatbot (conversations, messages)       |
 | `/api/ai`                 | PDF parsing, contract analysis, annex generation |
 | `/api/pretraga`           | Global search                                    |
 | `/api/settings`           | Tenant settings                                  |
@@ -297,8 +299,9 @@ sudo systemctl restart riforma-backend
 - [ ] `ENVIRONMENT=production` in `.env`
 - [ ] `AUTH_SECRET` is a strong random value (min 32 bytes)
 - [ ] `SEED_ADMIN_ON_STARTUP=true` for first boot, then set to `false`
+- [ ] `ANTHROPIC_API_KEY` set (required for AI Agent chatbot)
 - [ ] `BACKEND_CORS_ORIGINS` matches your frontend domain(s)
-- [ ] `alembic upgrade head` ran without errors
+- [ ] `alembic upgrade head` ran without errors (migrations 001–004)
 - [ ] Admin can log in at the frontend URL
 - [ ] SSL/TLS configured (see `DEPLOY.md` section 7)
 - [ ] Automated DB backups enabled (`deploy/riforma-backup.timer`)
