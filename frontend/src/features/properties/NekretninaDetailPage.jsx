@@ -239,7 +239,7 @@ const NekretninaDetailPage = () => {
         year: currentYear - 1,
         prihodi: property.prosllogodisnji_prihodi || 0,
         rashodi: property.prosllogodisnji_rashodi || 0,
-        neto: property.proslogodisnji_neto_prihod || 0,
+        neto: property.neto_prihod || 0,
       },
     ].filter((f) => f.prihodi > 0 || f.rashodi > 0);
   }, [property]);

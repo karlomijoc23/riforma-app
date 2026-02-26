@@ -586,8 +586,8 @@ export default function ProjectDetailsPage() {
                               <TableCell className="font-medium">
                                 {unit.oznaka}
                               </TableCell>
-                              <TableCell>{unit.tip}</TableCell>
-                              <TableCell>{unit.povrsina} m²</TableCell>
+                              <TableCell>{unit.naziv}</TableCell>
+                              <TableCell>{unit.povrsina_m2} m²</TableCell>
                               <TableCell>{unit.kat}</TableCell>
                               <TableCell>
                                 <Badge variant="outline">{unit.status}</Badge>

@@ -108,7 +108,7 @@ async def get_dashboard_stats(
     #  units that have an active contract pointing to them)
     units_by_property: Dict[str, List[Any]] = defaultdict(list)
     for u in all_units_rows:
-        pid = u.nekretnina_id or getattr(u, "property_id", None)
+        pid = u.nekretnina_id
         if pid:
             units_by_property[pid].append(u)
 

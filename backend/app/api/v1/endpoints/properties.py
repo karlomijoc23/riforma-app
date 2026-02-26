@@ -13,6 +13,7 @@ router = APIRouter()
 class PropertyCreate(BaseModel):
     naziv: str = Field(max_length=200)
     adresa: str = Field(max_length=500)
+    grad: Optional[str] = Field(default=None, max_length=200)
     katastarska_opcina: Optional[str] = Field(default=None, max_length=200)
     broj_kat_cestice: Optional[str] = Field(default=None, max_length=100)
     vrsta: VrstaNekrtnine = VrstaNekrtnine.OSTALO
@@ -43,6 +44,7 @@ class PropertyCreate(BaseModel):
 class PropertyUpdate(BaseModel):
     naziv: Optional[str] = Field(default=None, max_length=200)
     adresa: Optional[str] = Field(default=None, max_length=500)
+    grad: Optional[str] = Field(default=None, max_length=200)
     katastarska_opcina: Optional[str] = Field(default=None, max_length=200)
     broj_kat_cestice: Optional[str] = Field(default=None, max_length=100)
     vrsta: Optional[VrstaNekrtnine] = None

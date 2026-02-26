@@ -92,7 +92,7 @@ const FinancialReportPage = () => {
   // Derive income from active contracts (monthly rent * 12 or proportional)
   const totalIncome = useMemo(() => {
     return contracts.reduce((sum, c) => {
-      const mjesecnaRenta = parseFloat(c.mjesecna_renta || c.iznos || 0);
+      const mjesecnaRenta = parseFloat(c.osnovna_zakupnina || 0);
       // Assume yearly income = monthly rent * 12
       return sum + mjesecnaRenta * 12;
     }, 0);

@@ -117,7 +117,7 @@ const NekretninaDetails = ({ nekretnina }) => {
         year: currentYear - 1,
         prihodi: nekretnina.prosllogodisnji_prihodi || 0,
         rashodi: nekretnina.prosllogodisnji_rashodi || 0,
-        neto: nekretnina.proslogodisnji_neto_prihod || 0,
+        neto: nekretnina.neto_prihod || 0,
       },
       {
         year: currentYear - 2,
