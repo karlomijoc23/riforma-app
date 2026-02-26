@@ -57,7 +57,7 @@ Pravila:
 5. Formatiran odgovor — koristi liste i naslove za preglednost kad je potrebno.
 6. Kad korisnik pita nešto van domene upravljanja nekretninama, ljubazno objasni da si specijaliziran za RIFORMA platformu.
 7. Možeš generirati mjesečne izvještaje za bilo koji mjesec/godinu koristeći generate_report alat. Iz dobivenih podataka formuliraj pregledni izvještaj.
-8. Možeš kreirati nove ugovore koristeći create_ugovor alat (uz potvrdu korisnika). Za nekretnina_id i zakupnik_id koristi list_nekretnine i list_zakupnici alate.
+8. Možeš generirati špranca (draft) ugovora o zakupu koristeći generate_ugovor_document alat. Dohvati ugovor po ID-u i iz podataka formuliraj formalni tekst ugovora. Korisnik može prvo koristiti list_ugovori da pronađe željeni ugovor.
 """
 
 # ---------------------------------------------------------------------------
@@ -211,6 +211,20 @@ READ_TOOLS = [
             },
         },
     },
+    {
+        "name": "generate_ugovor_document",
+        "description": "Generiraj špranca (draft) ugovora o zakupu na temelju postojećeg ugovora iz baze. Dohvaća sve podatke o ugovoru, nekretnini, zakupniku i jedinici, te ih vraća za formuliranje formalnog teksta ugovora.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ugovor_id": {
+                    "type": "string",
+                    "description": "ID ugovora iz baze podataka",
+                },
+            },
+            "required": ["ugovor_id"],
+        },
+    },
 ]
 
 WRITE_TOOLS = [
@@ -288,28 +302,6 @@ WRITE_TOOLS = [
                 },
             },
             "required": ["ugovor_id", "novi_status"],
-        },
-    },
-    {
-        "name": "create_ugovor",
-        "description": "Kreiraj novi ugovor o najmu. Zahtijeva potvrdu korisnika. Koristi list_nekretnine i list_zakupnici za dohvat ID-ova.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "interna_oznaka": {"type": "string", "description": "Interna oznaka ugovora (npr. UG-2026-001)"},
-                "nekretnina_id": {"type": "string", "description": "ID nekretnine"},
-                "zakupnik_id": {"type": "string", "description": "ID zakupnika"},
-                "datum_pocetka": {"type": "string", "description": "Datum početka ugovora (YYYY-MM-DD)"},
-                "datum_zavrsetka": {"type": "string", "description": "Datum završetka ugovora (YYYY-MM-DD)"},
-                "trajanje_mjeseci": {"type": "integer", "description": "Trajanje ugovora u mjesecima"},
-                "osnovna_zakupnina": {"type": "number", "description": "Mjesečna zakupnina u EUR"},
-                "property_unit_id": {"type": "string", "description": "ID jedinice unutar nekretnine (opcionalno)"},
-                "namjena_prostora": {"type": "string", "description": "Namjena prostora (npr. ured, trgovina)"},
-                "napomena": {"type": "string", "description": "Dodatne napomene"},
-                "indeksacija": {"type": "boolean", "description": "Da li se primjenjuje indeksacija cijene"},
-                "polog_depozit": {"type": "number", "description": "Iznos pologa/depozita u EUR"},
-            },
-            "required": ["interna_oznaka", "nekretnina_id", "zakupnik_id", "datum_pocetka", "datum_zavrsetka", "trajanje_mjeseci"],
         },
     },
 ]
@@ -529,6 +521,90 @@ async def _execute_read(name: str, inp: Dict[str, Any]) -> Any:
             "maintenance_otvoreni": maintenance_otvoreni,
         }
 
+    elif name == "generate_ugovor_document":
+        ugovor = await ugovori.get_by_id(inp["ugovor_id"])
+        if not ugovor:
+            return {"error": "Ugovor nije pronađen"}
+
+        # Fetch related entities
+        nekretnina = await nekretnine.get_by_id(ugovor.nekretnina_id) if ugovor.nekretnina_id else None
+        zakupnik = await zakupnici.get_by_id(ugovor.zakupnik_id) if ugovor.zakupnik_id else None
+        jedinica = await property_units.get_by_id(ugovor.property_unit_id) if ugovor.property_unit_id else None
+
+        # Build comprehensive data for document generation
+        data = {
+            "ugovor": {
+                "id": ugovor.id,
+                "interna_oznaka": ugovor.interna_oznaka,
+                "datum_potpisivanja": str(ugovor.datum_potpisivanja) if ugovor.datum_potpisivanja else None,
+                "datum_pocetka": str(ugovor.datum_pocetka) if ugovor.datum_pocetka else None,
+                "datum_zavrsetka": str(ugovor.datum_zavrsetka) if ugovor.datum_zavrsetka else None,
+                "trajanje_mjeseci": ugovor.trajanje_mjeseci,
+                "osnovna_zakupnina": float(ugovor.osnovna_zakupnina or 0),
+                "zakupnina_po_m2": float(ugovor.zakupnina_po_m2) if ugovor.zakupnina_po_m2 else None,
+                "cam_troskovi": float(ugovor.cam_troskovi) if ugovor.cam_troskovi else None,
+                "polog_depozit": float(ugovor.polog_depozit) if ugovor.polog_depozit else None,
+                "garancija": float(ugovor.garancija) if ugovor.garancija else None,
+                "indeksacija": ugovor.indeksacija,
+                "indeks": ugovor.indeks,
+                "formula_indeksacije": ugovor.formula_indeksacije,
+                "opcija_produljenja": ugovor.opcija_produljenja,
+                "uvjeti_produljenja": ugovor.uvjeti_produljenja,
+                "rok_otkaza_dani": ugovor.rok_otkaza_dani,
+                "namjena_prostora": ugovor.namjena_prostora,
+                "obveze_odrzavanja": ugovor.obveze_odrzavanja,
+                "rezije_brojila": ugovor.rezije_brojila,
+                "status": ugovor.status,
+                "napomena": ugovor.napomena,
+            },
+            "zakupodavac": {
+                "napomena": "Podaci zakupodavca (vlasnika) nisu pohranjeni u sustavu — unesite ručno u dokument.",
+            },
+        }
+
+        if nekretnina:
+            data["nekretnina"] = {
+                "id": nekretnina.id,
+                "naziv": nekretnina.naziv,
+                "adresa": getattr(nekretnina, "adresa", None),
+                "grad": getattr(nekretnina, "grad", None),
+                "vrsta": getattr(nekretnina, "vrsta", None),
+                "povrsina_m2": float(nekretnina.povrsina_m2) if getattr(nekretnina, "povrsina_m2", None) else None,
+            }
+
+        if zakupnik:
+            data["zakupnik"] = {
+                "id": zakupnik.id,
+                "ime_prezime": zakupnik.ime_prezime,
+                "oib": getattr(zakupnik, "oib", None),
+                "kontakt_email": getattr(zakupnik, "kontakt_email", None),
+                "kontakt_telefon": getattr(zakupnik, "kontakt_telefon", None),
+                "adresa": getattr(zakupnik, "adresa", None),
+                "grad": getattr(zakupnik, "grad", None),
+                "postanski_broj": getattr(zakupnik, "postanski_broj", None),
+                "tip_osobe": getattr(zakupnik, "tip_osobe", None),
+                "naziv_tvrtke": getattr(zakupnik, "naziv_tvrtke", None),
+            }
+
+        if jedinica:
+            data["jedinica"] = {
+                "id": jedinica.id,
+                "naziv": getattr(jedinica, "naziv", None),
+                "oznaka": getattr(jedinica, "oznaka", None),
+                "kat": getattr(jedinica, "kat", None),
+                "povrsina_m2": float(jedinica.povrsina_m2) if getattr(jedinica, "povrsina_m2", None) else None,
+                "tip": getattr(jedinica, "tip", None),
+            }
+
+        data["upute"] = (
+            "Iz ovih podataka generiraj formalni tekst ugovora o zakupu na hrvatskom jeziku. "
+            "Ugovor treba sadržavati: ugovorne strane, predmet najma, trajanje, "
+            "cijenu i način plaćanja, depozit/jamstvo, indeksaciju, obveze stranaka, "
+            "otkaz ugovora, i završne odredbe. Formatiran kao pravni dokument."
+        )
+
+        return data
+
     return {"error": f"Nepoznat alat: {name}"}
 
 
@@ -596,32 +672,6 @@ async def _execute_write(name: str, inp: Dict[str, Any], user_id: str) -> Any:
         if not row:
             return {"error": "Ugovor nije pronađen"}
         return {"success": True, "id": uid, "message": f"Status ugovora promijenjen u '{inp['novi_status']}'."}
-
-    elif name == "create_ugovor":
-        data = {
-            "interna_oznaka": inp["interna_oznaka"],
-            "nekretnina_id": inp["nekretnina_id"],
-            "zakupnik_id": inp["zakupnik_id"],
-            "datum_pocetka": inp["datum_pocetka"],
-            "datum_zavrsetka": inp["datum_zavrsetka"],
-            "trajanje_mjeseci": inp["trajanje_mjeseci"],
-            "osnovna_zakupnina": inp.get("osnovna_zakupnina", 0),
-            "status": "aktivno",
-            "created_by": user_id,
-        }
-        # Optional fields
-        for field in ("property_unit_id", "namjena_prostora", "napomena", "polog_depozit"):
-            if inp.get(field) is not None:
-                data[field] = inp[field]
-        if inp.get("indeksacija") is not None:
-            data["indeksacija"] = inp["indeksacija"]
-
-        row = await ugovori.create(data)
-        return {
-            "success": True,
-            "id": row.id,
-            "message": f"Ugovor '{inp['interna_oznaka']}' kreiran.",
-        }
 
     return {"error": f"Nepoznat write alat: {name}"}
 
