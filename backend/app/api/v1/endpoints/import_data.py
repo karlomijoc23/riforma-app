@@ -2,6 +2,7 @@ import csv
 import io
 import logging
 import uuid
+from datetime import date, datetime, timezone
 from typing import Any, Dict
 
 from app.api import deps
@@ -176,29 +177,80 @@ async def import_ugovori(
             errors.append(f"Red {i + 2}: Interna oznaka je obavezna")
             continue
 
+        # Parse dates (required NOT NULL fields)
+        datum_pocetka_str = (row.get("Datum početka") or row.get("Datum pocetka") or "").strip()
+        datum_zavrsetka_str = (row.get("Datum završetka") or row.get("Datum zavrsetka") or "").strip()
+        try:
+            datum_pocetka = date.fromisoformat(datum_pocetka_str) if datum_pocetka_str else date.today()
+        except ValueError:
+            errors.append(f"Red {i + 2}: Neispravan format datuma početka: {datum_pocetka_str}")
+            continue
+        try:
+            datum_zavrsetka = date.fromisoformat(datum_zavrsetka_str) if datum_zavrsetka_str else None
+        except ValueError:
+            errors.append(f"Red {i + 2}: Neispravan format datuma završetka: {datum_zavrsetka_str}")
+            continue
+        if not datum_zavrsetka:
+            errors.append(f"Red {i + 2}: Datum završetka je obavezan")
+            continue
+
+        # Resolve nekretnina by ID or name
+        nekretnina_id = (row.get("Nekretnina ID") or "").strip() or None
+        if not nekretnina_id:
+            nek_naziv = (row.get("Nekretnina") or "").strip()
+            if nek_naziv:
+                found = await nekretnine.find_one(naziv=nek_naziv)
+                nekretnina_id = found.id if found else None
+        if not nekretnina_id:
+            all_props = await nekretnine.find_all()
+            nekretnina_id = all_props[0].id if all_props else None
+        if not nekretnina_id:
+            errors.append(f"Red {i + 2}: Nekretnina nije pronađena")
+            continue
+
+        # Resolve zakupnik by ID or name
+        zakupnik_id = (row.get("Zakupnik ID") or "").strip() or None
+        if not zakupnik_id:
+            zak_naziv = (row.get("Zakupnik") or "").strip()
+            if zak_naziv:
+                found = await zakupnici.find_one(naziv_firme=zak_naziv)
+                zakupnik_id = found.id if found else None
+        if not zakupnik_id:
+            errors.append(f"Red {i + 2}: Zakupnik nije pronađen")
+            continue
+
+        # Calculate trajanje
+        months = (datum_zavrsetka.year - datum_pocetka.year) * 12 + (datum_zavrsetka.month - datum_pocetka.month)
+
+        now = datetime.now(timezone.utc)
         item = {
             "id": str(uuid.uuid4()),
             "interna_oznaka": interna_oznaka,
+            "nekretnina_id": nekretnina_id,
+            "zakupnik_id": zakupnik_id,
             "status": (row.get("Status") or "").strip() or "aktivno",
-            "datum_pocetka": (row.get("Datum početka") or "").strip() or None,
-            "datum_zavrsetka": (row.get("Datum završetka") or "").strip() or None,
+            "datum_pocetka": datum_pocetka,
+            "datum_zavrsetka": datum_zavrsetka,
+            "trajanje_mjeseci": max(months, 1),
             "namjena_prostora": (row.get("Namjena prostora") or "").strip() or None,
             "created_by": current_user["id"],
+            "created_at": now,
+            "updated_at": now,
         }
 
         # Parse numeric fields
         try:
-            val = (row.get("Osnovna zakupnina €") or "").strip()
+            val = (row.get("Osnovna zakupnina €") or row.get("Osnovna zakupnina EUR") or "").strip()
             item["osnovna_zakupnina"] = float(val) if val else None
         except ValueError:
             item["osnovna_zakupnina"] = None
         try:
-            val = (row.get("CAM troškovi €") or "").strip()
+            val = (row.get("CAM troškovi €") or row.get("CAM troskovi EUR") or "").strip()
             item["cam_troskovi"] = float(val) if val else None
         except ValueError:
             item["cam_troskovi"] = None
         try:
-            val = (row.get("Polog/depozit €") or "").strip()
+            val = (row.get("Polog/depozit €") or row.get("Polog/depozit EUR") or "").strip()
             item["polog_depozit"] = float(val) if val else None
         except ValueError:
             item["polog_depozit"] = None
@@ -206,8 +258,12 @@ async def import_ugovori(
         indeksacija_raw = (row.get("Indeksacija") or "").strip().lower()
         item["indeksacija"] = indeksacija_raw in ("da", "yes", "true", "1")
 
-        await ugovori.create(item)
-        imported += 1
+        try:
+            await ugovori.create(item)
+            imported += 1
+        except Exception as e:
+            errors.append(f"Red {i + 2}: Greška pri uvozu: {str(e)}")
+            logger.error(f"Import contract row {i + 2} failed: {e}")
 
     return {
         "message": f"Uvezeno {imported} ugovora",

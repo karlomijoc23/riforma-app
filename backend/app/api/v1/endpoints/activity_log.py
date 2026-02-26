@@ -19,9 +19,9 @@ async def list_activity_logs(
     limit: int = Query(50, ge=1, le=200),
     current_user: Dict[str, Any] = Depends(deps.get_current_user),
 ):
-    """List activity logs for the current tenant, sorted by created_at descending."""
+    """List activity logs for the current tenant, sorted by timestamp descending."""
     items, total = await activity_logs.find_many(
-        order_by="created_at",
+        order_by="timestamp",
         order_dir="desc",
         skip=skip,
         limit=limit,

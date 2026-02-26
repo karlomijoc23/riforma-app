@@ -549,7 +549,7 @@ async def generate_monthly_report(
     expiring_contracts = [c for c in contracts if c.status == "na_isteku"]
 
     monthly_revenue = sum(
-        float(c.mjesecna_cijena or 0) for c in active_contracts
+        float(c.osnovna_zakupnina or 0) for c in active_contracts
     )
 
     open_maintenance = [
@@ -657,13 +657,17 @@ async def generate_monthly_report(
             "metadata": {"source": "fallback"},
         }
 
+    # Build lookup dicts for denormalized names
+    zakupnik_names = {t.id: t.naziv_firme for t in tenants}
+    nekretnina_names = {p.id: p.naziv for p in properties}
+
     # Build prompt data
     expiring_summary = [
         {
-            "zakupnik": c.zakupnik_naziv or "N/A",
-            "nekretnina": c.nekretnina_naziv or "N/A",
+            "zakupnik": zakupnik_names.get(c.zakupnik_id, "N/A"),
+            "nekretnina": nekretnina_names.get(c.nekretnina_id, "N/A"),
             "datum_zavrsetka": c.datum_zavrsetka or "N/A",
-            "mjesecna_cijena": c.mjesecna_cijena or 0,
+            "osnovna_zakupnina": c.osnovna_zakupnina or 0,
         }
         for c in expiring_contracts[:10]
     ]
@@ -672,7 +676,7 @@ async def generate_monthly_report(
             "opis": m.opis or "N/A",
             "prioritet": m.prioritet or "N/A",
             "status": m.status or "N/A",
-            "nekretnina": m.nekretnina_naziv or "N/A",
+            "nekretnina": nekretnina_names.get(m.nekretnina_id, "N/A"),
         }
         for m in open_maintenance[:10]
     ]

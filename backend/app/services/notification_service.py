@@ -129,7 +129,7 @@ async def notify_overdue_bills():
     today_str = date.today().isoformat()
 
     overdue = await racuni.find_all(extra_conditions=[
-        RacuniRow.status_placanja.in_(["neplaceno", "djelomicno"]),
+        RacuniRow.status_placanja.in_(["ceka_placanje", "djelomicno_placeno"]),
         RacuniRow.datum_dospijeca < today_str,
     ])
 

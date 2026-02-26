@@ -335,18 +335,20 @@ async def activity_logger(request: Request, call_next):
         }
 
         try:
-            log = ActivityLog(
-                user=principal.get("name", "anonymous"),
-                role=principal.get("role", DEFAULT_ROLE),
-                actor_id=principal.get("id"),
-                method=request.method,
-                path=request.url.path,
-                status_code=status_code,
-                scopes=principal.get("scopes", []),
-                request_id=request_id,
-                duration_ms=duration_ms,
-            )
-            await activity_logs.create(log.model_dump())
+            from app.db.tenant import CURRENT_TENANT_ID
+            if CURRENT_TENANT_ID.get(None) is not None:
+                log = ActivityLog(
+                    user=principal.get("name", "anonymous"),
+                    role=principal.get("role", DEFAULT_ROLE),
+                    actor_id=principal.get("id"),
+                    method=request.method,
+                    path=request.url.path,
+                    status_code=status_code,
+                    scopes=principal.get("scopes", []),
+                    request_id=request_id,
+                    duration_ms=duration_ms,
+                )
+                await activity_logs.create(log.model_dump())
         except Exception as e:
             logger.error(f"Failed to log activity: {e}")
 
@@ -354,25 +356,27 @@ async def activity_logger(request: Request, call_next):
     except Exception:
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         try:
-            principal = getattr(request.state, "current_user", None) or {
-                "id": "guest",
-                "name": "guest",
-                "role": DEFAULT_ROLE,
-                "scopes": resolve_role_scopes(DEFAULT_ROLE),
-            }
-            log = ActivityLog(
-                user=principal.get("name", "anonymous"),
-                role=principal.get("role", DEFAULT_ROLE),
-                actor_id=principal.get("id"),
-                method=request.method,
-                path=request.url.path,
-                status_code=500,
-                scopes=principal.get("scopes", []),
-                request_id=request_id,
-                duration_ms=duration_ms,
-                message="Interna greška poslužitelja",
-            )
-            await activity_logs.create(log.model_dump())
+            from app.db.tenant import CURRENT_TENANT_ID
+            if CURRENT_TENANT_ID.get(None) is not None:
+                principal = getattr(request.state, "current_user", None) or {
+                    "id": "guest",
+                    "name": "guest",
+                    "role": DEFAULT_ROLE,
+                    "scopes": resolve_role_scopes(DEFAULT_ROLE),
+                }
+                log = ActivityLog(
+                    user=principal.get("name", "anonymous"),
+                    role=principal.get("role", DEFAULT_ROLE),
+                    actor_id=principal.get("id"),
+                    method=request.method,
+                    path=request.url.path,
+                    status_code=500,
+                    scopes=principal.get("scopes", []),
+                    request_id=request_id,
+                    duration_ms=duration_ms,
+                    message="Interna greška poslužitelja",
+                )
+                await activity_logs.create(log.model_dump())
         except Exception:
             pass
         raise

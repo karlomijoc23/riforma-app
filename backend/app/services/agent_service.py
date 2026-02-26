@@ -461,7 +461,7 @@ async def _execute_read(name: str, inp: Dict[str, Any]) -> Any:
         active_contracts = [c for c in contracts if c.status == "aktivno"]
         expiring_contracts = [c for c in contracts if c.status == "na_isteku"]
 
-        monthly_revenue = sum(float(c.mjesecna_cijena or 0) for c in active_contracts)
+        monthly_revenue = sum(float(c.osnovna_zakupnina or 0) for c in active_contracts)
 
         open_maintenance = [
             m for m in maint_rows
@@ -490,7 +490,7 @@ async def _execute_read(name: str, inp: Dict[str, Any]) -> Any:
                 "zakupnik_id": c.zakupnik_id,
                 "datum_pocetka": str(c.datum_pocetka) if c.datum_pocetka else None,
                 "datum_zavrsetka": str(c.datum_zavrsetka) if c.datum_zavrsetka else None,
-                "mjesecna_cijena": float(c.mjesecna_cijena or 0),
+                "osnovna_zakupnina": float(c.osnovna_zakupnina or 0),
                 "status": c.status,
             })
 
@@ -572,7 +572,7 @@ async def _execute_read(name: str, inp: Dict[str, Any]) -> Any:
                 "adresa": getattr(nekretnina, "adresa", None),
                 "grad": getattr(nekretnina, "grad", None),
                 "vrsta": getattr(nekretnina, "vrsta", None),
-                "povrsina_m2": float(nekretnina.povrsina_m2) if getattr(nekretnina, "povrsina_m2", None) else None,
+                "povrsina": float(nekretnina.povrsina) if getattr(nekretnina, "povrsina", None) else None,
             }
 
         if zakupnik:
@@ -583,10 +583,10 @@ async def _execute_read(name: str, inp: Dict[str, Any]) -> Any:
                 "kontakt_email": getattr(zakupnik, "kontakt_email", None),
                 "kontakt_telefon": getattr(zakupnik, "kontakt_telefon", None),
                 "adresa": getattr(zakupnik, "adresa", None),
-                "grad": getattr(zakupnik, "grad", None),
-                "postanski_broj": getattr(zakupnik, "postanski_broj", None),
-                "tip_osobe": getattr(zakupnik, "tip_osobe", None),
-                "naziv_tvrtke": getattr(zakupnik, "naziv_tvrtke", None),
+                "adresa_grad": getattr(zakupnik, "adresa_grad", None),
+                "adresa_postanski_broj": getattr(zakupnik, "adresa_postanski_broj", None),
+                "tip": getattr(zakupnik, "tip", None),
+                "naziv_firme": getattr(zakupnik, "naziv_firme", None),
             }
 
         if jedinica:
@@ -596,7 +596,6 @@ async def _execute_read(name: str, inp: Dict[str, Any]) -> Any:
                 "oznaka": getattr(jedinica, "oznaka", None),
                 "kat": getattr(jedinica, "kat", None),
                 "povrsina_m2": float(jedinica.povrsina_m2) if getattr(jedinica, "povrsina_m2", None) else None,
-                "tip": getattr(jedinica, "tip", None),
             }
 
         data["upute"] = (

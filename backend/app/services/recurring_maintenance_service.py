@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 from app.db.repositories.instance import maintenance_tasks
 from app.models.tables import MaintenanceTaskRow
@@ -46,10 +46,10 @@ async def generate_recurring_tasks():
             continue
 
         # Check if task is completed or past due
-        status = task.status or "open"
+        status = task.status or "novi"
         due_date = task.rok  # date object or None
 
-        if status not in ("completed", "closed"):
+        if status not in ("zavrseno", "arhivirano"):
             # Only generate if past due date
             if due_date and due_date > today:
                 continue
@@ -59,7 +59,7 @@ async def generate_recurring_tasks():
         existing_next = await maintenance_tasks.find_one(
             parent_task_id=task_id,
             extra_conditions=[
-                MaintenanceTaskRow.status.in_(["open", "in_progress"]),
+                MaintenanceTaskRow.status.in_(["novi", "u_tijeku"]),
             ],
         )
 
@@ -97,8 +97,8 @@ async def generate_recurring_tasks():
             "id": str(uuid.uuid4()),
             "naziv": task.naziv or "",
             "opis": task.opis or "",
-            "status": "open",
-            "prioritet": task.prioritet or "medium",
+            "status": "novi",
+            "prioritet": task.prioritet or "srednje",
             "nekretnina_id": task.nekretnina_id,
             "property_unit_id": task.property_unit_id,
             "dodijeljeno_user_id": task.dodijeljeno_user_id,
@@ -108,7 +108,7 @@ async def generate_recurring_tasks():
             "ponavljanje_do": end_date,
             "parent_task_id": task_id,
             "aktivnosti": [],
-            "created_at": today_str,
+            "created_at": datetime.combine(today, time.min, tzinfo=timezone.utc),
         }
 
         await maintenance_tasks.create(new_task)
