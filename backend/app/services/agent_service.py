@@ -10,6 +10,7 @@ Provides:
 import json
 import logging
 import re
+import time
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -31,7 +32,8 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 MAX_CONTEXT_MESSAGES = 30
-MAX_TOOL_ITERATIONS = 5
+MAX_TOOL_ITERATIONS = 8
+REPORT_DATA_LIMIT = 500
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -429,12 +431,13 @@ async def _execute_read(name: str, inp: Dict[str, Any]) -> Any:
         if not (2020 <= godina <= 2099):
             return {"error": "Nevažeća godina"}
 
-        # Fetch all data
-        properties = await nekretnine.find_all()
-        units = await property_units.find_all()
-        contracts = await ugovori.find_all()
-        tenants = await zakupnici.find_all()
-        maintenance = await maintenance_tasks.find_all()
+        # Fetch data with limits to prevent memory issues at scale
+        lim = REPORT_DATA_LIMIT
+        properties, n_total = await nekretnine.find_many(limit=lim)
+        units, u_total = await property_units.find_many(limit=lim)
+        contracts, c_total = await ugovori.find_many(limit=lim)
+        tenants_count = await zakupnici.count()
+        maint_rows, _ = await maintenance_tasks.find_many(limit=lim)
 
         # Bills for requested month
         period_start = f"{godina}-{mjesec:02d}-01"
@@ -461,7 +464,7 @@ async def _execute_read(name: str, inp: Dict[str, Any]) -> Any:
         monthly_revenue = sum(float(c.mjesecna_cijena or 0) for c in active_contracts)
 
         open_maintenance = [
-            m for m in maintenance
+            m for m in maint_rows
             if m.status in ("novi", "planiran", "u_tijeku", "ceka_dobavljaca")
         ]
 
@@ -516,7 +519,7 @@ async def _execute_read(name: str, inp: Dict[str, Any]) -> Any:
             "racuni_mjesec_ukupno": round(total_bills, 2),
             "racuni_neplaceno": round(unpaid_bills, 2),
             "racuni_po_tipu": {k: round(v, 2) for k, v in bills_by_type.items()},
-            "zakupnici_ukupno": len(tenants),
+            "zakupnici_ukupno": tenants_count,
             "ugovori_detalji": ugovori_detalji,
             "maintenance_otvoreni": maintenance_otvoreni,
         }
@@ -695,6 +698,18 @@ def _get_async_client():
     return AsyncAnthropic(api_key=api_key)
 
 
+def _log_usage(response, label: str = "agent") -> None:
+    """Log token usage from an Anthropic API response."""
+    usage = getattr(response, "usage", None)
+    if usage:
+        logger.info(
+            "AI usage [%s]: input=%d output=%d tokens",
+            label,
+            getattr(usage, "input_tokens", 0),
+            getattr(usage, "output_tokens", 0),
+        )
+
+
 async def run_agent_turn(
     history: List[Dict[str, Any]],
     user_message: str,
@@ -708,19 +723,23 @@ async def run_agent_turn(
           write confirmation, and assistant_text is the confirmation prompt.
     """
     client = _get_async_client()
+    model = settings.CLAUDE_MODEL
 
     # Build messages — keep last N for context window management
     messages = list(history[-MAX_CONTEXT_MESSAGES:])
     messages.append({"role": "user", "content": user_message})
 
+    t0 = time.monotonic()
+
     for iteration in range(MAX_TOOL_ITERATIONS):
         response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=4096,
+            model=model,
+            max_tokens=8192,
             system=SYSTEM_PROMPT,
             tools=ALL_TOOLS,
             messages=messages,
         )
+        _log_usage(response, f"agent-iter-{iteration}")
 
         # Process response content blocks
         assistant_text_parts = []
@@ -734,10 +753,13 @@ async def run_agent_turn(
 
         # No tool use — return final text
         if not tool_use_block:
+            elapsed = time.monotonic() - t0
+            logger.info("Agent turn completed in %.1fs (%d iterations)", elapsed, iteration + 1)
             return "\n".join(assistant_text_parts), None
 
         tool_name = tool_use_block.name
         tool_input = tool_use_block.input
+        logger.info("Agent tool call: %s", tool_name)
 
         # WRITE tool — stop, request confirmation
         if tool_name in WRITE_TOOL_NAMES:
@@ -761,12 +783,13 @@ async def run_agent_turn(
 
             # Make another call so Claude formulates the confirmation message
             confirm_response = await client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=model,
                 max_tokens=1024,
                 system=SYSTEM_PROMPT,
                 tools=ALL_TOOLS,
                 messages=messages,
             )
+            _log_usage(confirm_response, "agent-confirm")
 
             confirm_text = ""
             for block in confirm_response.content:
@@ -778,6 +801,8 @@ async def run_agent_turn(
                 "tool_input": tool_input,
             }
 
+            elapsed = time.monotonic() - t0
+            logger.info("Agent turn (write confirm) completed in %.1fs", elapsed)
             return confirm_text, pending_action
 
         # READ tool — execute and continue loop
@@ -799,6 +824,8 @@ async def run_agent_turn(
         )
 
     # Max iterations reached — return whatever text we have
+    elapsed = time.monotonic() - t0
+    logger.warning("Agent hit max iterations (%d) after %.1fs", MAX_TOOL_ITERATIONS, elapsed)
     return (
         "\n".join(assistant_text_parts) if assistant_text_parts
         else "Ispričavam se, nisam uspio obraditi vaš zahtjev. Molim pokušajte ponovo.",
