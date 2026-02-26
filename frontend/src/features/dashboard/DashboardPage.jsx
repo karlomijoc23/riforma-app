@@ -12,6 +12,7 @@ import { Skeleton } from "../../components/ui/skeleton";
 import { toast } from "../../components/ui/sonner";
 import {
   Building,
+  Building2,
   FileText,
   DollarSign,
   Calendar,
@@ -61,16 +62,28 @@ const STATUS_LABELS = {
 
 export const Dashboard = () => {
   const navigate = useNavigate();
+  const [tenants, setTenants] = useState(null);
   const [dashboard, setDashboard] = useState(null);
   const [dashError, setDashError] = useState(null);
   const [expiringDocs, setExpiringDocs] = useState([]);
   const { zakupnici, ugovori, ensureZakupnici, ensureUgovori } =
     useEntityStore();
 
+  // Check if user has any tenants — runs once on mount
   useEffect(() => {
+    api
+      .getTenants()
+      .then((res) => setTenants(res.data || []))
+      .catch(() => setTenants([]));
+  }, []);
+
+  const hasTenants = tenants !== null && tenants.length > 0;
+
+  useEffect(() => {
+    if (!hasTenants) return;
     ensureZakupnici();
     ensureUgovori();
-  }, [ensureZakupnici, ensureUgovori]);
+  }, [hasTenants, ensureZakupnici, ensureUgovori]);
 
   // Ugovori koji uskoro istječu — status na_isteku ili istječe u 60 dana
   const ugovoriNaIsteku = useMemo(() => {
@@ -112,15 +125,17 @@ export const Dashboard = () => {
   }, []);
 
   useEffect(() => {
+    if (!hasTenants) return;
     fetchDashboard();
-  }, [fetchDashboard]);
+  }, [hasTenants, fetchDashboard]);
 
   useEffect(() => {
+    if (!hasTenants) return;
     api
       .getExpiringDokumenti(30)
       .then((res) => setExpiringDocs(res.data || []))
       .catch(() => setExpiringDocs([]));
-  }, []);
+  }, [hasTenants]);
 
   const formatCurrency = useCallback((value) => {
     const numeric = Number(value);
@@ -220,6 +235,34 @@ export const Dashboard = () => {
     }
     return null;
   };
+
+  // No tenant/portfolio — prompt user to create one
+  if (tenants !== null && tenants.length === 0) {
+    return (
+      <div className="mx-auto max-w-xl px-4 py-24 md:px-6">
+        <Card className="border-2 border-dashed border-primary/30 shadow-lg">
+          <CardContent className="pt-10 pb-10 flex flex-col items-center text-center gap-5">
+            <div className="rounded-full bg-primary/10 p-5">
+              <Building2 className="h-10 w-10 text-primary" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-semibold tracking-tight">
+                Kreirajte svoj prvi portfelj
+              </h2>
+              <p className="text-sm text-muted-foreground max-w-sm">
+                Portfelj grupira vaše nekretnine, zakupnike i ugovore.
+                Kreirajte ga u postavkama.
+              </p>
+            </div>
+            <Button size="lg" onClick={() => navigate("/postavke")}>
+              <Plus className="mr-2 h-5 w-5" />
+              Kreiraj portfelj
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (dashError && !dashboard) {
     return (
