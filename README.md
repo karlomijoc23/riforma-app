@@ -73,18 +73,23 @@ ENVIRONMENT=production
 
 ```
 backend/app/
-  api/v1/endpoints/   # 21 endpoint modules
-  core/               # config, security, roles, rate limiter
-  db/                 # document_store pattern, tenant isolation
-  middleware/          # CSRF protection
-  services/           # business logic (contract status sync)
+  api/v1/endpoints/       # 27 endpoint modules
+  core/                   # config, security, roles, rate limiter
+  db/repositories/        # base.py (BaseRepository), repos.py, instance.py
+  db/tenant.py            # CURRENT_TENANT_ID ContextVar
+  models/tables.py        # 23 SQLAlchemy ORM models
+  middleware/              # CSRF protection
+  services/               # business logic (contract status sync)
+
+backend/migrations/       # Alembic migrations (001–003)
+backend/scripts/          # migrate_data.py, test_migration.sh
 
 frontend/src/
-  features/           # auth, contracts, dashboard, documents,
-                      # maintenance, projects, properties,
-                      # settings, tenants
-  components/         # Navigation, TenantSwitcher, ui/ (Shadcn)
-  shared/             # api.js, auth.js, entityStore.js, formatters.js
+  features/               # auth, contracts, dashboard, documents,
+                          # maintenance, projects, properties,
+                          # settings, tenants
+  components/             # Navigation, TenantSwitcher, ui/ (Shadcn)
+  shared/                 # api.js, auth.js, entityStore.js, formatters.js
 ```
 
 ### Multi-tenant
@@ -202,16 +207,104 @@ See `DEPLOY.md` for full guide. Key files:
 
 ## Scripts
 
-| Script                      | Purpose                   |
-| --------------------------- | ------------------------- |
-| `scripts/start_backend.sh`  | Start backend dev server  |
-| `scripts/start_frontend.sh` | Start frontend dev server |
-| `scripts/stop_backend.sh`   | Stop backend              |
-| `scripts/stop_frontend.sh`  | Stop frontend             |
-| `scripts/deploy.sh`         | Production deployment     |
-| `scripts/setup-server.sh`   | Server setup/provisioning |
-| `scripts/backup-db.sh`      | Database backup           |
-| `scripts/restore-db.sh`     | Database restore          |
+| Script                              | Purpose                                      |
+| ----------------------------------- | -------------------------------------------- |
+| `scripts/start_backend.sh`          | Start backend dev server                     |
+| `scripts/start_frontend.sh`         | Start frontend dev server                    |
+| `scripts/stop_backend.sh`           | Stop backend                                 |
+| `scripts/stop_frontend.sh`          | Stop frontend                                |
+| `scripts/deploy.sh`                 | Production deployment                        |
+| `scripts/setup-server.sh`           | Server setup/provisioning                    |
+| `scripts/backup-db.sh`              | Database backup                              |
+| `scripts/restore-db.sh`             | Database restore                             |
+| `backend/scripts/migrate_data.py`   | ETL from document_store JSON → ORM tables    |
+| `backend/scripts/test_migration.sh` | Docker-based migration smoke test            |
+
+## Going Live
+
+Step-by-step guide for deploying a fresh instance or migrating an existing one.
+
+### Fresh Install
+
+```bash
+# 1. Set up the database
+sudo mariadb -e "
+CREATE DATABASE riforma CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'riforma'@'localhost' IDENTIFIED BY 'YOUR_PASSWORD';
+GRANT ALL PRIVILEGES ON riforma.* TO 'riforma'@'localhost';
+FLUSH PRIVILEGES;
+"
+
+# 2. Configure environment
+cd backend
+cp .env.production.example .env
+# Edit .env with DATABASE_URL, AUTH_SECRET, ANTHROPIC_API_KEY, etc.
+
+# 3. Install dependencies
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 4. Run Alembic migrations (creates all 23 tables)
+alembic upgrade head
+
+# 5. Start backend (seeds admin user on first run)
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 6. Build & serve frontend
+cd ../frontend
+npm install
+GENERATE_SOURCEMAP=false npx craco build
+# Copy build/ to your web server root (Apache/Nginx)
+```
+
+### Migrating from Document Store
+
+If upgrading from the old `document_store` JSON-column schema:
+
+```bash
+cd backend
+source .venv/bin/activate
+
+# 1. Run Alembic migrations (creates relational tables alongside document_store)
+alembic upgrade head
+
+# 2. Run the data migration ETL
+#    Reads from document_store, writes to the new relational tables.
+#    Uses INSERT IGNORE — safe to re-run.
+python scripts/migrate_data.py
+
+# 3. Verify row counts
+python -c "
+import pymysql, os
+conn = pymysql.connect(host='127.0.0.1', port=3306,
+    user=os.getenv('DB_USER','riforma'),
+    password=os.getenv('DB_PASSWORD'),
+    database=os.getenv('DB_NAME','riforma'))
+cur = conn.cursor()
+for t in ['nekretnine','zakupnici','ugovori','maintenance_tasks',
+          'property_units','dokumenti','racuni','projekti','users']:
+    cur.execute(f'SELECT COUNT(*) FROM \`{t}\`')
+    print(f'{t}: {cur.fetchone()[0]} rows')
+conn.close()
+"
+
+# 4. Restart backend to pick up new schema
+sudo systemctl restart riforma-backend
+```
+
+### Pre-Launch Checklist
+
+- [ ] `ENVIRONMENT=production` in `.env`
+- [ ] `AUTH_SECRET` is a strong random value (min 32 bytes)
+- [ ] `SEED_ADMIN_ON_STARTUP=true` for first boot, then set to `false`
+- [ ] `BACKEND_CORS_ORIGINS` matches your frontend domain(s)
+- [ ] `alembic upgrade head` ran without errors
+- [ ] Admin can log in at the frontend URL
+- [ ] SSL/TLS configured (see `DEPLOY.md` section 7)
+- [ ] Automated DB backups enabled (`deploy/riforma-backup.timer`)
+- [ ] Sentry DSN configured (optional: `SENTRY_DSN_BACKEND`)
+
+See `DEPLOY.md` for the full bare-metal Debian deployment guide.
 
 ## License
 
