@@ -290,8 +290,8 @@ const MaintenanceBoard = ({
         if (firstDueValue !== secondDueValue) {
           return firstDueValue - secondDueValue;
         }
-        const firstUpdated = new Date(a.azuriran || a.kreiran || 0).getTime();
-        const secondUpdated = new Date(b.azuriran || b.kreiran || 0).getTime();
+        const firstUpdated = new Date(a.updated_at || a.created_at || 0).getTime();
+        const secondUpdated = new Date(b.updated_at || b.created_at || 0).getTime();
         return secondUpdated - firstUpdated;
       });
     });
@@ -530,14 +530,14 @@ const MaintenanceBoard = ({
     if (!selectedTask) {
       return null;
     }
-    if (!selectedTask.kreiran) {
+    if (!selectedTask.created_at) {
       return null;
     }
-    const start = new Date(selectedTask.kreiran);
+    const start = new Date(selectedTask.created_at);
     if (Number.isNaN(start.getTime())) {
       return null;
     }
-    const finishSource = selectedTask.zavrseno_na || selectedTask.azuriran;
+    const finishSource = selectedTask.zavrseno_na || selectedTask.updated_at;
     if (!finishSource) {
       return null;
     }
@@ -574,7 +574,7 @@ const MaintenanceBoard = ({
 
       const taskId = task.id;
       const previousStatus = task.status;
-      const previousUpdatedAt = task.azuriran || null;
+      const previousUpdatedAt = task.updated_at || null;
       const previousCompletedAt = task.zavrseno_na || null;
       const nowIso = new Date().toISOString();
       const isCompleted = ["zavrseno", "arhivirano"].includes(nextStatus);
@@ -582,7 +582,7 @@ const MaintenanceBoard = ({
       const optimisticTask = {
         ...task,
         status: nextStatus,
-        azuriran: nowIso,
+        updated_at: nowIso,
         zavrseno_na: isCompleted ? nowIso : null,
       };
 
@@ -618,7 +618,7 @@ const MaintenanceBoard = ({
         const revertTask = {
           ...task,
           status: previousStatus,
-          azuriran: previousUpdatedAt,
+          updated_at: previousUpdatedAt,
           zavrseno_na: previousCompletedAt,
         };
         syncMaintenanceTask?.(revertTask);

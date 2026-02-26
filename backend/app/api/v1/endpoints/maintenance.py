@@ -27,12 +27,16 @@ class MaintenanceTaskCreate(BaseModel):
     ugovor_id: Optional[str] = Field(default=None, max_length=100)
     prijavio_user_id: Optional[str] = Field(default=None, max_length=100)
     dodijeljeno_user_id: Optional[str] = Field(default=None, max_length=100)
+    prijavio: Optional[str] = Field(default=None, max_length=200)
+    dodijeljeno: Optional[str] = Field(default=None, max_length=200)
     status: MaintenanceStatus = MaintenanceStatus.NOVI
     prioritet: MaintenancePriority = MaintenancePriority.SREDNJE
     datum_prijave: Optional[date] = None
     rok: Optional[date] = None
     trosak_materijal: Optional[float] = None
     trosak_rad: Optional[float] = None
+    procijenjeni_trosak: Optional[float] = None
+    stvarni_trosak: Optional[float] = None
     napomena: Optional[str] = Field(default=None, max_length=5000)
     oznake: List[str] = Field(default=[], max_length=50)
     aktivnosti: List[Dict[str, Any]] = Field(default=[], max_length=100)
@@ -57,11 +61,15 @@ class MaintenanceTaskUpdate(BaseModel):
     property_unit_id: Optional[str] = Field(default=None, max_length=100)
     ugovor_id: Optional[str] = Field(default=None, max_length=100)
     dodijeljeno_user_id: Optional[str] = Field(default=None, max_length=100)
+    prijavio: Optional[str] = Field(default=None, max_length=200)
+    dodijeljeno: Optional[str] = Field(default=None, max_length=200)
     status: Optional[MaintenanceStatus] = None
     prioritet: Optional[MaintenancePriority] = None
     rok: Optional[date] = None
     trosak_materijal: Optional[float] = None
     trosak_rad: Optional[float] = None
+    procijenjeni_trosak: Optional[float] = None
+    stvarni_trosak: Optional[float] = None
     napomena: Optional[str] = Field(default=None, max_length=5000)
     oznake: Optional[List[str]] = Field(default=None, max_length=50)
     # Supplier / vendor fields

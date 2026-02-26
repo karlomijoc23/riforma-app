@@ -137,8 +137,11 @@ TABLE_COLUMNS: Dict[str, List[str]] = {
     "maintenance_tasks": [
         "id", "tenant_id", "naziv", "opis", "nekretnina_id",
         "property_unit_id", "ugovor_id", "zakupnik_id",
-        "prijavio_user_id", "dodijeljeno_user_id", "status", "prioritet",
+        "prijavio_user_id", "dodijeljeno_user_id",
+        "prijavio", "dodijeljeno",
+        "status", "prioritet",
         "datum_prijave", "rok", "trosak_materijal", "trosak_rad",
+        "procijenjeni_trosak", "stvarni_trosak",
         "napomena", "oznake", "aktivnosti", "dobavljac_naziv",
         "dobavljac_kontakt", "dobavljac_telefon", "ponavljanje",
         "ponavljanje_do", "parent_task_id", "created_by",

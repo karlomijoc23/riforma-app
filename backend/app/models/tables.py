@@ -685,10 +685,20 @@ class MaintenanceTaskRow(Base):
     prioritet: Mapped[str] = mapped_column(String(50), default="srednje")
     datum_prijave: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     rok: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    prijavio: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    dodijeljeno: Mapped[Optional[str]] = mapped_column(
+        String(200), nullable=True
+    )
     trosak_materijal: Mapped[Optional[float]] = mapped_column(
         Float, nullable=True
     )
     trosak_rad: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    procijenjeni_trosak: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
+    stvarni_trosak: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
     napomena: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     oznake: Mapped[Any] = mapped_column(sa.JSON, default=list)
     aktivnosti: Mapped[Any] = mapped_column(sa.JSON, default=list)

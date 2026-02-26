@@ -433,6 +433,8 @@ def upgrade() -> None:
         sa.Column("zakupnik_id", sa.String(36), nullable=True),
         sa.Column("prijavio_user_id", sa.String(36), nullable=True),
         sa.Column("dodijeljeno_user_id", sa.String(36), nullable=True),
+        sa.Column("prijavio", sa.String(200), nullable=True),
+        sa.Column("dodijeljeno", sa.String(200), nullable=True),
         sa.Column("status", sa.String(50), nullable=False, server_default="novi"),
         sa.Column(
             "prioritet", sa.String(50), nullable=False, server_default="srednje"
@@ -441,6 +443,8 @@ def upgrade() -> None:
         sa.Column("rok", sa.Date(), nullable=True),
         sa.Column("trosak_materijal", sa.Float(), nullable=True),
         sa.Column("trosak_rad", sa.Float(), nullable=True),
+        sa.Column("procijenjeni_trosak", sa.Float(), nullable=True),
+        sa.Column("stvarni_trosak", sa.Float(), nullable=True),
         sa.Column("napomena", sa.Text(), nullable=True),
         sa.Column("oznake", sa.JSON(), nullable=True),
         sa.Column("aktivnosti", sa.JSON(), nullable=True),
