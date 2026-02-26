@@ -15,6 +15,8 @@ Usage::
 from app.db.session import get_async_session_factory
 from app.db.repositories.repos import (
     ActivityLogRepository,
+    AiConversationRepository,
+    AiMessageRepository,
     DobavljaciRepository,
     DokumentiRepository,
     HandoverProtocolRepository,
@@ -69,3 +71,5 @@ oglasi = OglasiRepository(_sf)
 notifications = NotificationRepository(_sf)
 dobavljaci = DobavljaciRepository(_sf)
 webhook_events = WebhookEventRepository(_sf)
+ai_conversations = AiConversationRepository(_sf)
+ai_messages = AiMessageRepository(_sf)

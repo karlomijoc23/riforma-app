@@ -48,7 +48,7 @@ class TenantCreate(BaseModel):
         return validate_iban(v)
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("tenants:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("tenants:read"))])
 async def get_my_tenants(
     current_user: Dict[str, Any] = Depends(deps.get_current_user),
 ):
@@ -77,7 +77,7 @@ async def get_my_tenants(
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(deps.require_scopes("tenants:create"))],
 )

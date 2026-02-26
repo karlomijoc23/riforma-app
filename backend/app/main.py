@@ -11,7 +11,7 @@ from app.core.limiter import limiter
 from app.core.logging_config import setup_logging
 from app.core.roles import DEFAULT_ROLE, resolve_role_scopes
 from app.core.security import hash_password
-from app.db.repositories.instance import users as users_repo, activity_logs
+from app.db.repositories.instance import users as users_repo, activity_logs, saas_tenants, tenant_memberships
 from app.db.session import dispose_engine
 from app.models.domain import ActivityLog, User
 from app.services.contract_status_service import sync_contract_and_unit_statuses
@@ -45,18 +45,28 @@ async def run_scheduler():
     """
     Background task to run periodic jobs.
     """
+    from app.db.tenant import CURRENT_TENANT_ID
+
     while True:
         try:
-            # Run daily checks
-            await sync_contract_and_unit_statuses()
-            from app.services.recurring_maintenance_service import (
-                generate_recurring_tasks,
-            )
+            # Background jobs need a tenant context; iterate over all active tenants
+            all_tenants = await saas_tenants.find_all(filters={"status": "active"})
+            for t in all_tenants:
+                CURRENT_TENANT_ID.set(t.id)
+                try:
+                    await sync_contract_and_unit_statuses()
+                    from app.services.recurring_maintenance_service import (
+                        generate_recurring_tasks,
+                    )
 
-            await generate_recurring_tasks()
-            from app.services.notification_service import run_all_notifications
+                    await generate_recurring_tasks()
+                    from app.services.notification_service import run_all_notifications
 
-            await run_all_notifications()
+                    await run_all_notifications()
+                except Exception as e:
+                    logger.error(f"Scheduler error for tenant {t.id}: {e}")
+                finally:
+                    CURRENT_TENANT_ID.set(None)
         except Exception as e:
             logger.error(f"Error in background scheduler: {e}")
 
@@ -107,9 +117,44 @@ async def lifespan(app: FastAPI):
                 ),
             })
 
+    # Seed default tenant + membership so the admin can use the app immediately
+    if settings.SEED_ADMIN_ON_STARTUP:
+        DEFAULT_TENANT_ID = "tenant-default"
+        existing_tenant = await saas_tenants.find_one(id=DEFAULT_TENANT_ID)
+        if not existing_tenant:
+            await saas_tenants.create({
+                "id": DEFAULT_TENANT_ID,
+                "naziv": "Moj portfelj",
+                "tip": "company",
+                "status": "active",
+            })
+            logger.info(f"Seeded default tenant: {DEFAULT_TENANT_ID}")
+
+        # Link admin user to the default tenant
+        admin_user = await users_repo.find_one(email=settings.INITIAL_ADMIN_EMAIL.lower())
+        if admin_user:
+            existing_membership = await tenant_memberships.find_one(
+                user_id=admin_user.id, tenant_id=DEFAULT_TENANT_ID
+            )
+            if not existing_membership:
+                await tenant_memberships.create({
+                    "user_id": admin_user.id,
+                    "tenant_id": DEFAULT_TENANT_ID,
+                    "role": "owner",
+                    "status": "active",
+                })
+                logger.info(f"Linked admin to default tenant")
+
     # Run initial status sync on startup (fix stale data immediately)
+    from app.db.tenant import CURRENT_TENANT_ID
     try:
-        await sync_contract_and_unit_statuses()
+        all_tenants = await saas_tenants.find_all(filters={"status": "active"})
+        for t in all_tenants:
+            CURRENT_TENANT_ID.set(t.id)
+            try:
+                await sync_contract_and_unit_statuses()
+            finally:
+                CURRENT_TENANT_ID.set(None)
         logger.info("Initial contract/unit status sync completed.")
     except Exception as e:
         logger.error(f"Initial status sync failed: {e}")
@@ -133,6 +178,7 @@ app = FastAPI(
     description="Riforma Proptech Platform API",
     version="1.0.0",
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 

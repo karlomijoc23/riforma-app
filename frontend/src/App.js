@@ -18,6 +18,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import PageTransition from "./components/PageTransition";
 import LoginPage from "./features/auth/LoginPage";
 import { Navigation } from "./components/Navigation";
+import { AiAgentBubble } from "./components/AiAgent/AiAgentBubble";
 import { SkipLink } from "./components/ui/responsive-table";
 import { OnboardingWizard } from "./features/onboarding/OnboardingWizard";
 
@@ -76,9 +77,6 @@ const TenantStatementPage = React.lazy(
 const HelpPage = React.lazy(() => import("./features/help/HelpPage"));
 const OglasiPage = React.lazy(() => import("./features/listings/OglasiPage"));
 const PricingPage = React.lazy(() => import("./features/pricing/PricingPage"));
-const ActivityLogPage = React.lazy(
-  () => import("./features/activity/ActivityLogPage"),
-);
 const VendorsPage = React.lazy(() => import("./features/vendors/VendorsPage"));
 const ForgotPasswordPage = React.lazy(
   () => import("./features/auth/ForgotPasswordPage"),
@@ -150,6 +148,7 @@ const AppContent = () => {
       <OnboardingWizard />
       <div className="App">
         <Navigation />
+        <AiAgentBubble />
         <main id="main-content">
           <AnimatePresence mode="wait">
             <Routes location={location} key={location.pathname}>
@@ -338,14 +337,6 @@ const AppContent = () => {
                 element={
                   <PageTransition>
                     <OglasiPage />
-                  </PageTransition>
-                }
-              />
-              <Route
-                path="/aktivnost"
-                element={
-                  <PageTransition>
-                    <ActivityLogPage />
                   </PageTransition>
                 }
               />

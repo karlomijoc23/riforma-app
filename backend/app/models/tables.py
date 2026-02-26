@@ -1324,6 +1324,64 @@ class WebhookEventRow(Base):
     tenant: Mapped["SaasTenantRow"] = relationship(lazy="noload")
 
 
+class AiConversationRow(Base):
+    """AI agent chat conversations."""
+
+    __tablename__ = "ai_conversations"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=_new_uuid
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("saas_tenants.id"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow
+    )
+
+    # Relationships
+    tenant: Mapped["SaasTenantRow"] = relationship(lazy="noload")
+    user: Mapped["UserRow"] = relationship(lazy="noload")
+    messages: Mapped[List["AiMessageRow"]] = relationship(
+        back_populates="conversation",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        order_by="AiMessageRow.created_at",
+    )
+
+
+class AiMessageRow(Base):
+    """Individual messages within an AI conversation."""
+
+    __tablename__ = "ai_messages"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=_new_uuid
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("ai_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # user, assistant
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    pending_action: Mapped[Optional[Any]] = mapped_column(
+        sa.JSON, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    # Relationships
+    conversation: Mapped["AiConversationRow"] = relationship(
+        back_populates="messages", lazy="noload"
+    )
+
+
 class DobavljaciRow(Base):
     """Vendors / suppliers (dobavljaci)."""
 
@@ -1384,4 +1442,6 @@ ALL_MODELS = [
     NotificationRow,
     DobavljaciRow,
     WebhookEventRow,
+    AiConversationRow,
+    AiMessageRow,
 ]

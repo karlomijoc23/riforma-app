@@ -122,7 +122,7 @@ class StakeholderCreate(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 @router.get(
-    "/",
+    "",
     dependencies=[Depends(deps.require_scopes("projects:read"))],
     response_model=List[Project],
 )
@@ -138,7 +138,7 @@ async def get_projects(
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[
         Depends(deps.require_scopes("projects:create")),

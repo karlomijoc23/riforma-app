@@ -56,7 +56,7 @@ class TenantSettings(BaseModel):
         return validate_iban(v)
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("settings:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("settings:read"))])
 async def get_settings(
     current_user: Dict[str, Any] = Depends(deps.get_current_user),
 ):
@@ -76,7 +76,7 @@ async def get_settings(
 
 
 @router.put(
-    "/",
+    "",
     dependencies=[
         Depends(deps.require_scopes("settings:write")),
         Depends(deps.require_tenant()),

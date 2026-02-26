@@ -94,7 +94,7 @@ RECURRENCE_DELTAS = {
 }
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("maintenance:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("maintenance:read"))])
 async def get_maintenance_tasks(
     response: Response,
     skip: int = 0,
@@ -314,7 +314,7 @@ async def get_maintenance_report(
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[
         Depends(deps.require_scopes("maintenance:create")),

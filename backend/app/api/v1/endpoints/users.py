@@ -34,7 +34,7 @@ class UserCreate(BaseModel):
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(deps.require_scopes("users:create"))],
 )
@@ -84,7 +84,7 @@ async def create_user(
     return response_data
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("users:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("users:read"))])
 async def get_users(
     skip: int = 0,
     limit: int = 100,

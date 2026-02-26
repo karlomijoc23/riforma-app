@@ -90,7 +90,7 @@ class TenantUpdate(BaseModel):
     napomena: Optional[str] = None
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("tenants:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("tenants:read"))])
 async def get_tenants(
     response: Response,
     skip: int = 0,
@@ -122,7 +122,7 @@ async def get_tenants(
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(deps.require_scopes("tenants:create"))],
 )

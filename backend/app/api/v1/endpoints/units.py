@@ -23,7 +23,7 @@ class PropertyUnitUpdate(BaseModel):
     napomena: Optional[str] = None
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("properties:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("properties:read"))])
 async def get_units(
     response: Response,
     skip: int = 0,

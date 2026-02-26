@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 router = APIRouter()
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("properties:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("properties:read"))])
 async def search(
     q: str,
     current_user: Dict[str, Any] = Depends(deps.get_current_user),

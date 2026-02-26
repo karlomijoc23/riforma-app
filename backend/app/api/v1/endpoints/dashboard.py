@@ -22,7 +22,7 @@ _dashboard_cache: Dict[str, Tuple[float, dict]] = {}
 _CACHE_TTL_SECONDS = 30  # refresh every 30s
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("reports:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("reports:read"))])
 async def get_dashboard_stats(
     current_user: Dict[str, Any] = Depends(deps.get_current_user),
 ):

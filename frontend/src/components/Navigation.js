@@ -8,7 +8,6 @@ import {
   Wrench,
   Pickaxe,
   TrendingUp,
-  Activity,
   Truck,
   Search,
   X,
@@ -183,7 +182,6 @@ export const Navigation = () => {
     { path: "/odrzavanje", icon: Wrench, label: "Održavanje" },
     { path: "/projekti", icon: Pickaxe, label: "Projekti" },
     { path: "/analiza-cijena", icon: TrendingUp, label: "Cijene" },
-    { path: "/aktivnost", icon: Activity, label: "Aktivnost" },
     { path: "/dobavljaci", icon: Truck, label: "Dobavljaci" },
   ];
 

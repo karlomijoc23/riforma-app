@@ -6,15 +6,9 @@ export const getBackendUrl = () => {
   if (envUrl && envUrl.trim() !== "") {
     return envUrl.replace(/\/+$/, "");
   }
-  // Production: empty string = same origin (nginx proxies /api/ to backend)
-  // Development fallback: direct backend access
+  // Both dev (CRA proxy via setupProxy.js) and production (nginx) proxy
+  // /api to the backend, so same-origin requests work everywhere.
   if (typeof window !== "undefined") {
-    // If served on port 3000 (dev server), point to backend on 8000
-    if (window.location.port === "3000") {
-      const protocol = window.location.protocol;
-      return `${protocol}//${window.location.hostname}:8000`;
-    }
-    // Production: same origin (nginx handles proxying)
     return "";
   }
   return "http://127.0.0.1:8000";
@@ -518,6 +512,26 @@ export const api = {
     apiClient.post(`${API_ROOT}/notifications/${id}/read`),
   markAllNotificationsRead: () =>
     apiClient.post(`${API_ROOT}/notifications/read-all`),
+
+  // AI Agent
+  agentCreateConversation: (data) =>
+    apiClient.post(`${API_ROOT}/agent/conversations`, data),
+  agentListConversations: () =>
+    apiClient.get(`${API_ROOT}/agent/conversations`),
+  agentGetConversation: (id) =>
+    apiClient.get(`${API_ROOT}/agent/conversations/${id}`),
+  agentSendMessage: (conversationId, data) =>
+    apiClient.post(
+      `${API_ROOT}/agent/conversations/${conversationId}/messages`,
+      data,
+    ),
+  agentConfirmAction: (conversationId, data) =>
+    apiClient.post(
+      `${API_ROOT}/agent/conversations/${conversationId}/confirm`,
+      data,
+    ),
+  agentDeleteConversation: (id) =>
+    apiClient.delete(`${API_ROOT}/agent/conversations/${id}`),
 };
 
 export const buildDocumentUrl = (dokument) => {

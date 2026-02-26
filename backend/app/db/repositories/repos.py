@@ -3,6 +3,8 @@
 from app.db.repositories.base import BaseRepository
 from app.models.tables import (
     ActivityLogRow,
+    AiConversationRow,
+    AiMessageRow,
     DobavljaciRow,
     DokumentiRow,
     HandoverProtocolRow,
@@ -146,6 +148,16 @@ class NotificationRepository(BaseRepository[NotificationRow]):
 class WebhookEventRepository(BaseRepository[WebhookEventRow]):
     model = WebhookEventRow
     tenant_scoped = True
+
+
+class AiConversationRepository(BaseRepository[AiConversationRow]):
+    model = AiConversationRow
+    tenant_scoped = True
+
+
+class AiMessageRepository(BaseRepository[AiMessageRow]):
+    model = AiMessageRow
+    tenant_scoped = False  # Scoped via conversation FK, not directly
 
 
 class DobavljaciRepository(BaseRepository[DobavljaciRow]):

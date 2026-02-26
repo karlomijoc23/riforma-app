@@ -1,5 +1,6 @@
 from app.api.v1.endpoints import (
     activity_log,
+    agent,
     ai,
     auth,
     contracts,
@@ -47,6 +48,7 @@ api_router.include_router(parking.router, prefix="/parking", tags=["parking"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(search.router, prefix="/pretraga", tags=["search"])
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
+api_router.include_router(agent.router, prefix="/agent", tags=["agent"])
 api_router.include_router(units.router, prefix="/units", tags=["units"])
 api_router.include_router(
     handover_protocols.router, prefix="/handover-protocols", tags=["handover_protocols"]

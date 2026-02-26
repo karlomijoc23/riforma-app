@@ -8,7 +8,7 @@ router = APIRouter()
 
 
 @router.get(
-    "/",
+    "",
     dependencies=[
         Depends(deps.require_scopes("reports:read")),
         Depends(deps.require_tenant()),

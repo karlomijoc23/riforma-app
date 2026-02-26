@@ -85,7 +85,7 @@ class PropertyOut(PropertyCreate):
 
 
 @router.get(
-    "/",
+    "",
     dependencies=[Depends(deps.require_scopes("properties:read"))],
     response_model=list[PropertyOut],
 )
@@ -107,7 +107,7 @@ async def get_properties(
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[
         Depends(deps.require_scopes("properties:create")),

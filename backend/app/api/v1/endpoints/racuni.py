@@ -236,7 +236,7 @@ def _build_bill_rejected_email(
 # --------------- CRUD ---------------
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("financials:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("financials:read"))])
 async def get_racuni(
     skip: int = 0,
     limit: int = 200,
@@ -284,7 +284,7 @@ async def get_racuni(
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[
         Depends(deps.require_scopes("financials:create")),

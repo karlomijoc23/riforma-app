@@ -43,7 +43,7 @@ async def get_contract_protocols(
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[
         Depends(deps.require_scopes("leases:update")),

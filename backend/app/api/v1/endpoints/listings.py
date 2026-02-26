@@ -294,7 +294,7 @@ def _build_njuskalo_xml(listings: List[Dict[str, Any]]) -> str:
 
 
 @router.get(
-    "/",
+    "",
     dependencies=[Depends(deps.require_scopes("listings:read"))],
 )
 async def get_listings(
@@ -344,7 +344,7 @@ async def get_listings(
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[
         Depends(deps.require_scopes("listings:create")),

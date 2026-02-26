@@ -88,7 +88,7 @@ class DocumentCreate(BaseModel):
     maintenance_task_id: Optional[str] = None
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("documents:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("documents:read"))])
 async def get_documents(
     skip: int = 0,
     limit: int = 100,
@@ -110,7 +110,7 @@ async def get_documents(
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[
         Depends(deps.require_scopes("documents:create")),

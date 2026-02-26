@@ -39,7 +39,7 @@ class VendorOut(VendorCreate):
 
 
 @router.get(
-    "/",
+    "",
     dependencies=[Depends(deps.require_scopes("maintenance:read"))],
     response_model=list[VendorOut],
 )
@@ -76,7 +76,7 @@ async def get_vendor(
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[
         Depends(deps.require_scopes("maintenance:create")),

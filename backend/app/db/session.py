@@ -19,12 +19,18 @@ def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         db_settings = settings.DB_SETTINGS
-        kwargs = {"echo": db_settings.echo}
-        kwargs["pool_size"] = db_settings.pool_size
-        kwargs["max_overflow"] = db_settings.max_overflow
-        kwargs["pool_recycle"] = 3600  # Recommend pool recycle for MariaDB
+        url = db_settings.sqlalchemy_url()
+        kwargs: dict = {"echo": db_settings.echo}
 
-        _engine = create_async_engine(db_settings.sqlalchemy_url(), **kwargs)
+        if url.startswith("sqlite"):
+            # SQLite doesn't support pool_size/pool_recycle
+            kwargs["connect_args"] = {"check_same_thread": False}
+        else:
+            kwargs["pool_size"] = db_settings.pool_size
+            kwargs["max_overflow"] = db_settings.max_overflow
+            kwargs["pool_recycle"] = 3600
+
+        _engine = create_async_engine(url, **kwargs)
     return _engine
 
 

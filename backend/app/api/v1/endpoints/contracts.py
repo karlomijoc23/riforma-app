@@ -338,7 +338,7 @@ async def _notify_creator(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("leases:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("leases:read"))])
 async def get_contracts(
     response: Response,
     skip: int = 0,
@@ -380,7 +380,7 @@ async def get_contracts(
 
 
 @router.post(
-    "/",
+    "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[
         Depends(deps.require_scopes("leases:create")),

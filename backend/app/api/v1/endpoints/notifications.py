@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/", dependencies=[Depends(deps.require_scopes("reports:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("reports:read"))])
 async def get_notifications(
     skip: int = 0,
     limit: int = 20,
