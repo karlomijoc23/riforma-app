@@ -3,6 +3,7 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import sentry_sdk
 from app.api.v1.api import api_router
@@ -49,6 +50,16 @@ async def run_scheduler():
 
     while True:
         try:
+            # Clean up expired revoked tokens
+            from app.db.repositories.instance import revoked_tokens
+            from app.models.tables import RevokedTokenRow
+
+            await revoked_tokens.delete_many(
+                extra_conditions=[
+                    RevokedTokenRow.expires_at < datetime.now(timezone.utc)
+                ]
+            )
+
             # Background jobs need a tenant context; iterate over all active tenants
             all_tenants = await saas_tenants.find_all(filters={"status": "active"})
             for t in all_tenants:

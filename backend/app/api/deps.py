@@ -2,7 +2,7 @@ from typing import Any, Dict, Optional
 
 from app.core.config import get_settings
 from app.core.roles import DEFAULT_ROLE, resolve_role_scopes, scope_matches
-from app.db.repositories.instance import users, tenant_memberships
+from app.db.repositories.instance import users, tenant_memberships, revoked_tokens
 from fastapi import Depends, HTTPException, Request, status
 from jose import JWTError, jwt
 
@@ -56,6 +56,17 @@ async def get_current_user(request: Request) -> Dict[str, Any]:
             detail="Neautorizirano",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Check if token has been revoked (logout blacklist)
+    jti = payload.get("jti")
+    if jti:
+        revoked = await revoked_tokens.find_one(jti=jti)
+        if revoked:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Neautorizirano",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
     # Fetch user from DB via repository
     user_row = await users.get_by_id(user_id)

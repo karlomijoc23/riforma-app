@@ -32,6 +32,7 @@ from app.db.repositories.repos import (
     ProjectTransactionRepository,
     PropertyUnitRepository,
     RacuniRepository,
+    RevokedTokenRepository,
     SaasTenantRepository,
     TenantMembershipRepository,
     TenantSettingsRepository,
@@ -46,6 +47,7 @@ _sf = get_async_session_factory()
 # ---- Global repos --------------------------------------------------------
 
 users = UserRepository(_sf)
+revoked_tokens = RevokedTokenRepository(_sf)
 saas_tenants = SaasTenantRepository(_sf)
 tenant_memberships = TenantMembershipRepository(_sf)
 

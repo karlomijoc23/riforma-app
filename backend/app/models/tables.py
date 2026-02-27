@@ -88,6 +88,26 @@ class UserRow(Base):
     )
 
 
+class RevokedTokenRow(Base):
+    """Revoked JWT tokens (logout blacklist).
+
+    Checked on each authenticated request. Expired entries are cleaned up
+    periodically by the background scheduler.
+    """
+
+    __tablename__ = "revoked_tokens"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=_new_uuid
+    )
+    jti: Mapped[str] = mapped_column(
+        String(255), unique=True, nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    revoked_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class SaasTenantRow(Base):
     """
     SaaS tenant / portfolio entity.
@@ -280,22 +300,28 @@ class NekretnineRow(Base):
         back_populates="nekretnine", lazy="noload"
     )
     property_units: Mapped[List["PropertyUnitRow"]] = relationship(
-        back_populates="nekretnina", lazy="noload"
+        back_populates="nekretnina", lazy="noload",
+        cascade="all, delete-orphan",
     )
     ugovori: Mapped[List["UgovoriRow"]] = relationship(
-        back_populates="nekretnina", lazy="noload"
+        back_populates="nekretnina", lazy="noload",
+        passive_deletes=True,
     )
     dokumenti: Mapped[List["DokumentiRow"]] = relationship(
-        back_populates="nekretnina", lazy="noload"
+        back_populates="nekretnina", lazy="noload",
+        passive_deletes=True,
     )
     maintenance_tasks: Mapped[List["MaintenanceTaskRow"]] = relationship(
-        back_populates="nekretnina", lazy="noload"
+        back_populates="nekretnina", lazy="noload",
+        passive_deletes=True,
     )
     parking_spaces: Mapped[List["ParkingSpaceRow"]] = relationship(
-        back_populates="nekretnina", lazy="noload"
+        back_populates="nekretnina", lazy="noload",
+        cascade="all, delete-orphan",
     )
     racuni: Mapped[List["RacuniRow"]] = relationship(
-        back_populates="nekretnina", lazy="noload"
+        back_populates="nekretnina", lazy="noload",
+        passive_deletes=True,
     )
     linked_projekti: Mapped[List["ProjektiRow"]] = relationship(
         back_populates="linked_property", lazy="noload"
@@ -314,7 +340,7 @@ class PropertyUnitRow(Base):
         String(36), ForeignKey("saas_tenants.id"), nullable=False, index=True
     )
     nekretnina_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("nekretnine.id"), nullable=False, index=True
+        String(36), ForeignKey("nekretnine.id", ondelete="CASCADE"), nullable=False, index=True
     )
     oznaka: Mapped[str] = mapped_column(String(100), nullable=False)
     naziv: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -474,13 +500,13 @@ class UgovoriRow(Base):
         String(36), ForeignKey("saas_tenants.id"), nullable=False, index=True
     )
     nekretnina_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("nekretnine.id"), nullable=False, index=True
+        String(36), ForeignKey("nekretnine.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     zakupnik_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("zakupnici.id"), nullable=False, index=True
+        String(36), ForeignKey("zakupnici.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     property_unit_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("property_units.id"), nullable=True, index=True
+        String(36), ForeignKey("property_units.id", ondelete="SET NULL"), nullable=True, index=True
     )
     interna_oznaka: Mapped[str] = mapped_column(String(100), nullable=False)
     datum_potpisivanja: Mapped[Optional[date]] = mapped_column(
@@ -574,10 +600,12 @@ class UgovoriRow(Base):
         back_populates="ugovor", lazy="noload"
     )
     handover_protocols: Mapped[List["HandoverProtocolRow"]] = relationship(
-        back_populates="contract", lazy="noload"
+        back_populates="contract", lazy="noload",
+        cascade="all, delete-orphan",
     )
     racuni: Mapped[List["RacuniRow"]] = relationship(
         back_populates="ugovor", lazy="noload",
+        passive_deletes=True,
         foreign_keys="RacuniRow.ugovor_id",
     )
 
@@ -597,13 +625,13 @@ class DokumentiRow(Base):
     tip: Mapped[str] = mapped_column(String(100), default="ostalo")
     opis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     nekretnina_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("nekretnine.id"), nullable=True, index=True
+        String(36), ForeignKey("nekretnine.id", ondelete="SET NULL"), nullable=True, index=True
     )
     zakupnik_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("zakupnici.id"), nullable=True, index=True
+        String(36), ForeignKey("zakupnici.id", ondelete="SET NULL"), nullable=True, index=True
     )
     ugovor_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("ugovori.id"), nullable=True, index=True
+        String(36), ForeignKey("ugovori.id", ondelete="SET NULL"), nullable=True, index=True
     )
     property_unit_id: Mapped[Optional[str]] = mapped_column(
         String(36), nullable=True
@@ -664,13 +692,13 @@ class MaintenanceTaskRow(Base):
     naziv: Mapped[str] = mapped_column(String(200), nullable=False)
     opis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     nekretnina_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("nekretnine.id"), nullable=True, index=True
+        String(36), ForeignKey("nekretnine.id", ondelete="SET NULL"), nullable=True, index=True
     )
     property_unit_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("property_units.id"), nullable=True
+        String(36), ForeignKey("property_units.id", ondelete="SET NULL"), nullable=True
     )
     ugovor_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("ugovori.id"), nullable=True
+        String(36), ForeignKey("ugovori.id", ondelete="SET NULL"), nullable=True
     )
     zakupnik_id: Mapped[Optional[str]] = mapped_column(
         String(36), nullable=True
@@ -805,7 +833,7 @@ class ParkingSpaceRow(Base):
         String(36), ForeignKey("saas_tenants.id"), nullable=False, index=True
     )
     nekretnina_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("nekretnine.id"), nullable=False, index=True
+        String(36), ForeignKey("nekretnine.id", ondelete="CASCADE"), nullable=False, index=True
     )
     floor: Mapped[str] = mapped_column(String(20), nullable=False)
     internal_id: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -838,7 +866,7 @@ class HandoverProtocolRow(Base):
         String(36), ForeignKey("saas_tenants.id"), nullable=False, index=True
     )
     contract_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("ugovori.id"), nullable=False, index=True
+        String(36), ForeignKey("ugovori.id", ondelete="CASCADE"), nullable=False, index=True
     )
     type: Mapped[str] = mapped_column(String(20), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -882,7 +910,7 @@ class ProjektiRow(Base):
         Float, nullable=True
     )
     linked_property_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("nekretnine.id"), nullable=True
+        String(36), ForeignKey("nekretnine.id", ondelete="SET NULL"), nullable=True
     )
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -1118,16 +1146,16 @@ class RacuniRow(Base):
     iznos: Mapped[float] = mapped_column(Float, default=0.0)
     valuta: Mapped[str] = mapped_column(String(10), default="EUR")
     nekretnina_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("nekretnine.id"), nullable=True, index=True
+        String(36), ForeignKey("nekretnine.id", ondelete="SET NULL"), nullable=True, index=True
     )
     zakupnik_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("zakupnici.id"), nullable=True
+        String(36), ForeignKey("zakupnici.id", ondelete="SET NULL"), nullable=True
     )
     property_unit_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("property_units.id"), nullable=True
+        String(36), ForeignKey("property_units.id", ondelete="SET NULL"), nullable=True
     )
     ugovor_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("ugovori.id"), nullable=True
+        String(36), ForeignKey("ugovori.id", ondelete="SET NULL"), nullable=True
     )
     status_placanja: Mapped[str] = mapped_column(
         String(50), default="ceka_placanje"
@@ -1220,10 +1248,10 @@ class OglasiRow(Base):
         String(36), ForeignKey("saas_tenants.id"), nullable=False, index=True
     )
     nekretnina_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("nekretnine.id"), nullable=True, index=True
+        String(36), ForeignKey("nekretnine.id", ondelete="SET NULL"), nullable=True, index=True
     )
     property_unit_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("property_units.id"), nullable=True
+        String(36), ForeignKey("property_units.id", ondelete="SET NULL"), nullable=True
     )
     tip_ponude: Mapped[str] = mapped_column(
         String(50), nullable=False
@@ -1420,6 +1448,7 @@ class DobavljaciRow(Base):
 
 ALL_MODELS = [
     UserRow,
+    RevokedTokenRow,
     SaasTenantRow,
     TenantMembershipRow,
     NekretnineRow,

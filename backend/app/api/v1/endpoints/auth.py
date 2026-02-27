@@ -12,6 +12,7 @@ from app.db.repositories.instance import users, saas_tenants, tenant_memberships
 from app.models.domain import UserPublic
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from jose import jwt
 from pydantic import BaseModel, EmailStr, field_validator
 
 logger = logging.getLogger(__name__)
@@ -174,8 +175,40 @@ async def login(request: Request, login_data: LoginRequest):
 
 
 @router.post("/logout")
-async def logout():
-    """Clear auth cookies."""
+async def logout(request: Request):
+    """Clear auth cookies and revoke the current token."""
+    from app.db.repositories.instance import revoked_tokens
+
+    # Revoke the current token so it can't be reused
+    token_value = request.cookies.get("access_token")
+    if not token_value:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token_value = auth_header.split(" ", 1)[1].strip()
+
+    if token_value:
+        try:
+            payload = jwt.decode(
+                token_value,
+                settings.AUTH_SECRET,
+                algorithms=[settings.AUTH_ALGORITHM],
+            )
+            jti = payload.get("jti")
+            if jti:
+                from datetime import timezone as tz
+
+                exp = payload.get("exp")
+                expires_at = datetime.fromtimestamp(exp, tz=tz.utc) if exp else (
+                    datetime.now(tz.utc) + timedelta(hours=24)
+                )
+                await revoked_tokens.create({
+                    "jti": jti,
+                    "user_id": payload.get("sub", ""),
+                    "expires_at": expires_at,
+                })
+        except Exception:
+            pass  # Token invalid/expired — no need to revoke
+
     response = JSONResponse(content={"message": "Odjava uspješna"})
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("csrf_token", path="/")
@@ -213,7 +246,9 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest):
             user.id,
             {"reset_token": token, "reset_token_expires": expiry},
         )
-        # TODO: Send email with reset link when SMTP configured
+        from app.core.email import send_password_reset_email
+
+        await send_password_reset_email(email, token)
         logger.info("Password reset token generated for %s", email)
     return {
         "message": "Ako postoji račun s tom adresom, poslali smo upute za resetiranje."

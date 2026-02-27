@@ -20,6 +20,7 @@ from app.models.tables import (
     ProjectTransactionRow,
     PropertyUnitRow,
     RacuniRow,
+    RevokedTokenRow,
     SaasTenantRow,
     TenantMembershipRow,
     TenantSettingsRow,
@@ -37,6 +38,11 @@ from app.models.tables import (
 
 class UserRepository(BaseRepository[UserRow]):
     model = UserRow
+    tenant_scoped = False
+
+
+class RevokedTokenRepository(BaseRepository[RevokedTokenRow]):
+    model = RevokedTokenRow
     tenant_scoped = False
 
 
