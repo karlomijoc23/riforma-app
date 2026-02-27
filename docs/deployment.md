@@ -10,7 +10,7 @@ This document walks through deploying the Riforma stack using Render for the Fas
 
 ## 2. Backend on Render
 
-Render uses `render.yaml` and the Dockerfile under `backend/`.
+Render uses `render.yaml` to configure the backend service.
 
 1. **Create secrets (Render Dashboard → Secrets):**
    - `riforma-database-url` → MariaDB connection string.

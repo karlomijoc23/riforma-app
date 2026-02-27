@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import AsyncGenerator, Dict, Iterable
+from typing import AsyncGenerator, Dict
 
 import pytest
 import pytest_asyncio
@@ -15,24 +15,45 @@ os.environ.setdefault("SEED_ADMIN_ON_STARTUP", "false")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 
 from app.core.config import get_settings  # noqa: E402
-from app.db.instance import db  # noqa: E402
+from app.core.roles import resolve_role_scopes  # noqa: E402
+from app.core.security import hash_password  # noqa: E402
+from app.db.repositories.instance import (  # noqa: E402
+    activity_logs,
+    dokumenti,
+    maintenance_tasks,
+    nekretnine,
+    property_units,
+    saas_tenants,
+    tenant_memberships,
+    users,
+    ugovori,
+    zakupnici,
+)
+from app.core.limiter import limiter  # noqa: E402
 from app.main import app  # noqa: E402
 
 settings = get_settings()
 
+# Disable rate limiting for tests
+limiter.enabled = False
+
+
+def _run_async(coro):
+    """Run an async coroutine from sync test code."""
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(coro)
+
 
 @pytest.fixture(scope="session", autouse=True)
 def init_test_db():
-    import asyncio
-
     from app.db.base import Base
-
-    # Ensure models are loaded
     from app.db.session import get_engine
 
     async def _init():
         engine = get_engine()
-        print(f"DEBUG: DB URL is {settings.DB_SETTINGS.sqlalchemy_url()}")
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
@@ -41,152 +62,136 @@ def init_test_db():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
 
-    try:
-        asyncio.run(_init())
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(_init())
+    _run_async(_init())
 
     yield
 
-    try:
-        asyncio.run(_teardown())
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(_teardown())
+    _run_async(_teardown())
 
 
-RESET_COLLECTIONS = (
-    "nekretnine",
-    "property_units",
-    "zakupnici",
-    "ugovori",
-    "dokumenti",
-    "activity_logs",
-    "maintenance_tasks",
-    "tenants",
-    "tenant_memberships",
-    "users",
-)
+# Repos to clear between tests (children before parents for FK safety)
+_REPOS_TO_CLEAR = [
+    activity_logs,
+    dokumenti,
+    maintenance_tasks,
+    ugovori,
+    property_units,
+    zakupnici,
+    nekretnine,
+    tenant_memberships,
+    saas_tenants,
+    users,
+]
 
 
-def _clear_collections(collection_names: Iterable[str] = RESET_COLLECTIONS) -> None:
-    import asyncio
+def _clear_tables() -> None:
+    """Delete all rows from test tables using raw SQL to bypass tenant scoping."""
 
     async def clear():
-        for name in collection_names:
-            collection = getattr(db, name, None)
-            if collection is None:
-                continue
-            await collection.delete_many({})
+        from sqlalchemy import text
 
-    try:
-        asyncio.run(clear())
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(clear())
+        from app.db.session import get_async_session_factory
+
+        sf = get_async_session_factory()
+        async with sf() as session:
+            # Disable FK checks for SQLite
+            await session.execute(text("PRAGMA foreign_keys = OFF"))
+            for repo in _REPOS_TO_CLEAR:
+                table_name = repo.model.__tablename__
+                await session.execute(text(f"DELETE FROM {table_name}"))
+            await session.execute(text("PRAGMA foreign_keys = ON"))
+            await session.commit()
+
+    _run_async(clear())
 
 
 def _bootstrap_users(client: TestClient) -> Dict[str, Dict[str, str]]:
-    admin_payload = {
-        "email": "admin@example.com",
-        "password": "AdminPass123!",
-        "full_name": "Admin User",
-        "role": "admin",
-        "scopes": ["users:create", "users:read"],
-    }
-    response = client.post("/api/auth/register", json=admin_payload)
-    assert response.status_code == 200, response.text
+    """Create admin + PM users and return auth headers for each."""
 
-    # Force update role in DB since register endpoint ignores it
-    async def set_admin_role():
-        await db.users.update_one(
-            {"email": admin_payload["email"]},
-            {"$set": {"role": "admin", "scopes": admin_payload["scopes"]}},
-        )
+    # Seed admin directly via ORM (register endpoint requires users:create scope)
+    async def seed_admin():
+        admin = await users.create({
+            "email": "admin@example.com",
+            "password_hash": hash_password("AdminPass123!"),
+            "full_name": "Admin User",
+            "role": "admin",
+            "scopes": resolve_role_scopes("admin", []),
+        })
+        # Create default tenant
+        existing = await saas_tenants.find_one(id=settings.DEFAULT_TENANT_ID)
+        if not existing:
+            await saas_tenants.create({
+                "id": settings.DEFAULT_TENANT_ID,
+                "naziv": "Default Tenant",
+                "status": "active",
+            })
+        # Link admin to default tenant
+        await tenant_memberships.create({
+            "user_id": admin.id,
+            "tenant_id": settings.DEFAULT_TENANT_ID,
+            "role": "owner",
+            "status": "active",
+        })
+        return admin.id
 
-    try:
-        asyncio.run(set_admin_role())
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(set_admin_role())
+    _run_async(seed_admin())
 
+    # Login as admin (token is in httpOnly cookie, not response body)
     login_resp = client.post(
         "/api/auth/login",
-        json={"email": admin_payload["email"], "password": admin_payload["password"]},
+        json={"email": "admin@example.com", "password": "AdminPass123!"},
     )
     assert login_resp.status_code == 200, login_resp.text
-    admin_token = login_resp.json()["access_token"]
-    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    admin_token = login_resp.cookies.get("access_token")
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "X-Tenant-Id": settings.DEFAULT_TENANT_ID,
+    }
 
+    # Register PM via API (admin has users:create scope)
     pm_payload = {
         "email": "pm@example.com",
         "password": "PmPass123!",
         "full_name": "Property Manager",
-        "role": "property_manager",
+        "create_tenant": False,  # We create the membership manually in setup_pm
     }
     response = client.post("/api/auth/register", json=pm_payload, headers=admin_headers)
     assert response.status_code == 200, response.text
     pm_user = response.json()
 
-    # Force update role in DB
-    async def set_pm_role():
-        await db.users.update_one(
-            {"email": pm_payload["email"]}, {"$set": {"role": "property_manager"}}
-        )
+    # Update PM role and create membership
+    async def setup_pm():
+        user = await users.find_one(email="pm@example.com")
+        if user:
+            await users.update_by_id(user.id, {
+                "role": "property_manager",
+                "scopes": resolve_role_scopes("property_manager", []),
+            })
+        await tenant_memberships.create({
+            "user_id": pm_user["id"],
+            "tenant_id": settings.DEFAULT_TENANT_ID,
+            "role": "property_manager",
+            "status": "active",
+        })
 
-    try:
-        asyncio.run(set_pm_role())
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(set_pm_role())
+    _run_async(setup_pm())
 
+    # Login as PM
     pm_login = client.post(
         "/api/auth/login",
-        json={"email": pm_payload["email"], "password": pm_payload["password"]},
+        json={"email": "pm@example.com", "password": "PmPass123!"},
     )
     assert pm_login.status_code == 200, pm_login.text
-    pm_token = pm_login.json()["access_token"]
+    pm_token = pm_login.cookies.get("access_token")
 
-    # Create tenant membership for PM
-    async def create_membership():
-        await db.tenant_memberships.insert_one(
-            {
-                "tenant_id": settings.DEFAULT_TENANT_ID,
-                "user_id": pm_user["id"],
-                "role": "property_manager",
-                "status": "active",
-            }
-        )
-
-    try:
-        asyncio.run(create_membership())
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(create_membership())
-
-    tenant_header = {"X-Tenant-Id": settings.DEFAULT_TENANT_ID}
-
-    # Ensure default tenant exists in DB
-    async def create_default_tenant():
-        tenant = await db.tenants.find_one({"id": settings.DEFAULT_TENANT_ID})
-        if not tenant:
-            await db.tenants.insert_one(
-                {
-                    "id": settings.DEFAULT_TENANT_ID,
-                    "naziv": "Default Tenant",
-                    "status": "active",
-                }
-            )
-
-    try:
-        asyncio.run(create_default_tenant())
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(create_default_tenant())
+    # Clear cookies from the client so that subsequent requests only use
+    # the explicit Authorization headers (Bearer tokens), not stale cookies.
+    # deps.py checks cookies before Bearer headers, so leftover cookies
+    # from the PM login would override admin Bearer tokens.
+    client.cookies.clear()
 
     return {
-        "admin_headers": {**admin_headers, **tenant_header},
+        "admin_headers": admin_headers,
         "pm_headers": {
             "Authorization": f"Bearer {pm_token}",
             "X-Tenant-Id": settings.DEFAULT_TENANT_ID,
@@ -206,10 +211,10 @@ def client() -> TestClient:
 
 @pytest.fixture()
 def app_context(client: TestClient) -> Dict[str, Dict[str, str]]:
-    _clear_collections()
+    _clear_tables()
     context = _bootstrap_users(client)
     yield context
-    _clear_collections()
+    _clear_tables()
 
 
 @pytest.fixture()

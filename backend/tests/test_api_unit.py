@@ -18,7 +18,11 @@ def test_api_create_unit():
         print(f"Login failed: {resp.text}")
         sys.exit(1)
 
-    token = resp.json()["access_token"]
+    # Token is in httpOnly cookie; extract it for Bearer header
+    token = resp.cookies.get("access_token")
+    if not token:
+        print("No access_token cookie in login response")
+        sys.exit(1)
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     # Get user info to get tenant_id

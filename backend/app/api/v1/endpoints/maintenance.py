@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, or_
+from sqlalchemy import String, cast, func, or_
 
 from app.api import deps
 from app.db.repositories.instance import (
@@ -129,9 +129,17 @@ async def get_maintenance_tasks(
     if rok_do:
         extra_conds.append(MaintenanceTaskRow.rok <= rok_do)
     if oznaka:
-        extra_conds.append(
-            func.json_contains(MaintenanceTaskRow.oznake, f'"{oznaka}"')
-        )
+        # json_contains is MariaDB-specific; fall back to LIKE for SQLite
+        from app.core.config import get_settings as _get_settings
+        _db_url = _get_settings().DB_SETTINGS.sqlalchemy_url()
+        if _db_url.startswith("sqlite"):
+            extra_conds.append(
+                cast(MaintenanceTaskRow.oznake, String).like(f'%"{oznaka}"%')
+            )
+        else:
+            extra_conds.append(
+                func.json_contains(MaintenanceTaskRow.oznake, f'"{oznaka}"')
+            )
     if dobavljac:
         extra_conds.append(
             MaintenanceTaskRow.dobavljac_naziv.ilike(f"%{dobavljac}%")

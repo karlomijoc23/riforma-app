@@ -101,9 +101,12 @@ async def get_current_user(request: Request) -> Dict[str, Any]:
 
     if not membership:
         # Header missing, invalid, or user has no access -> pick first active
-        first_membership = await tenant_memberships.find_one(
-            user_id=user_row.id, status="active"
+        active_memberships = await tenant_memberships.find_all(
+            filters={"user_id": user_row.id, "status": "active"},
+            order_by="created_at",
+            order_dir="asc",
         )
+        first_membership = active_memberships[0] if active_memberships else None
         if first_membership:
             tenant_id = first_membership.tenant_id
             principal["tenant_role"] = first_membership.role or "member"

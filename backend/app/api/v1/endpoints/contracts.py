@@ -32,8 +32,15 @@ async def advisory_lock_for_unit(unit_id: str, timeout: int = 5):
 
     This prevents the TOCTOU race where two concurrent requests both pass
     the overlap check and then both insert a contract for the same unit.
+    Gracefully skips locking on SQLite (used in tests).
     """
     if not unit_id:
+        yield
+        return
+
+    from app.core.config import get_settings as _get_settings
+    db_url = _get_settings().DB_SETTINGS.sqlalchemy_url()
+    if db_url.startswith("sqlite"):
         yield
         return
 

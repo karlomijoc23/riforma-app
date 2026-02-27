@@ -1,5 +1,6 @@
 import os
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,28 +14,32 @@ settings = get_settings()
 
 
 @pytest.fixture(autouse=True)
-def mock_openai(monkeypatch):
-    class StubChat:
-        def __init__(self):
-            self.completions = SimpleNamespace(create=self._create)
+def mock_anthropic(monkeypatch):
+    """Mock the Anthropic client used by the AI endpoint."""
 
+    class StubMessages:
         @staticmethod
-        def _create(**kwargs):
+        def create(**kwargs):
             return SimpleNamespace(
-                choices=[
+                content=[
                     SimpleNamespace(
-                        message=SimpleNamespace(
-                            content="""ANEKS UGOVORA\n\n1. Predmet izmjene ...\n2. Nova zakupnina ...\n3. Ostale odredbe ostaju na snazi."""
+                        text=(
+                            "ANEKS UGOVORA\n\n1. Predmet izmjene ...\n"
+                            "2. Nova zakupnina ...\n"
+                            "3. Ostale odredbe ostaju na snazi."
                         )
                     )
                 ]
             )
 
-    class StubOpenAI:
+    class StubAnthropicClient:
         def __init__(self, *args, **kwargs):
-            self.chat = StubChat()
+            self.messages = StubMessages()
 
-    monkeypatch.setattr("app.api.v1.endpoints.ai.OpenAI", StubOpenAI)
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.ai._get_anthropic_client",
+        lambda: StubAnthropicClient(),
+    )
     yield
 
 
@@ -137,21 +142,15 @@ def test_generate_contract_annex_success(client, pm_headers):
     assert "ANEKS UGOVORA" in payload["content"]
     assert payload["metadata"]["nova_zakupnina"] == 2750.0
     assert payload["metadata"]["novi_datum_zavrsetka"] == "2025-12-31"
-    assert payload["metadata"].get("source") == "openai"
+    assert payload["metadata"].get("source") == "anthropic"
 
 
 def test_generate_contract_annex_without_key(client, pm_headers, monkeypatch):
-    # Patch settings in ai module
-    from app.core.config import Settings
-
-    # Create a new settings instance with empty key
-    # We need to preserve other settings if possible, or just rely on defaults
-    # Since we only care about OPENAI_API_KEY for this test...
-    # But Settings loads from env, so we should set env var first then instantiate
-    monkeypatch.setenv("OPENAI_API_KEY", "")
-    new_settings = Settings()
-    new_settings.OPENAI_API_KEY = ""
-    monkeypatch.setattr("app.api.v1.endpoints.ai.settings", new_settings)
+    # Override the mock to return None (no API key scenario)
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.ai._get_anthropic_client",
+        lambda: None,
+    )
 
     nekretnina_id = _create_property(client, pm_headers)
     zakupnik_id = _create_tenant(client, pm_headers)

@@ -11,7 +11,7 @@ Platforma za upravljanje nekretninama — FastAPI backend, React 19 frontend, AI
 | Database | MariaDB 11.4 (async via asyncmy)                          |
 | AI       | Anthropic Claude (AI Agent chatbot, PDF parsing, aneksi)  |
 | Auth     | JWT httpOnly cookies, CSRF double-submit, rate limiting   |
-| Deploy   | Docker Compose, Nginx, systemd                            |
+| Deploy   | Apache2 reverse proxy, systemd                            |
 
 ## Quick Start
 
@@ -39,13 +39,22 @@ npm install
 npm start          # dev server on port 3000
 ```
 
-### Production (Docker)
+### Production (Apache2)
 
 ```bash
-docker compose up -d
-```
+# Backend: systemd service running uvicorn
+sudo systemctl start riforma-backend
 
-Services: MariaDB, Backend (uvicorn), Frontend (Nginx), MariaDB Exporter (Prometheus).
+# Frontend: build and copy to Apache DocumentRoot
+cd frontend && GENERATE_SOURCEMAP=false npx craco build
+sudo cp -r build/* /var/www/riforma/
+
+# Apache config
+sudo cp apache/riforma.conf /etc/apache2/sites-available/
+sudo a2ensite riforma
+sudo a2enmod proxy proxy_http rewrite headers deflate
+sudo systemctl reload apache2
+```
 
 ## Environment Variables
 
@@ -191,18 +200,22 @@ pre-commit run --all-files   # black, isort, prettier, flake8
 
 ## Deployment
 
-### Docker Compose (recommended)
+### Apache2 (recommended)
 
 ```bash
-docker compose up -d
-```
+# Enable required Apache modules
+sudo a2enmod proxy proxy_http rewrite headers deflate
 
-### Bare-metal (Debian/Ubuntu)
+# Copy config and enable site
+sudo cp apache/riforma.conf /etc/apache2/sites-available/
+sudo a2ensite riforma
+sudo systemctl reload apache2
+```
 
 See `DEPLOY.md` for full guide. Key files:
 
+- `apache/riforma.conf` — Apache2 VirtualHost (reverse proxy + SPA)
 - `deploy/riforma-backend.service` — systemd service (hardened)
-- `deploy/riforma-frontend.service` — Nginx service
 - `deploy/riforma-backup.service` + `.timer` — automated DB backups
 - `scripts/deploy.sh` — deployment script
 - `scripts/setup-server.sh` — server provisioning
@@ -220,7 +233,7 @@ See `DEPLOY.md` for full guide. Key files:
 | `scripts/backup-db.sh`              | Database backup                              |
 | `scripts/restore-db.sh`             | Database restore                             |
 | `backend/scripts/migrate_data.py`   | ETL from document_store JSON → ORM tables    |
-| `backend/scripts/test_migration.sh` | Docker-based migration smoke test            |
+| `backend/scripts/test_migration.sh` | Migration smoke test                         |
 
 ## Going Live
 
@@ -256,7 +269,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 cd ../frontend
 npm install
 GENERATE_SOURCEMAP=false npx craco build
-# Copy build/ to your web server root (Apache/Nginx)
+# Copy build/ to Apache DocumentRoot
+sudo cp -r build/* /var/www/riforma/
 ```
 
 ### Migrating from Document Store

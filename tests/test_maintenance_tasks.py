@@ -92,7 +92,7 @@ def _create_task(client, pm_headers, pm_user_id, payload):
     assert pm_user_id is not None
     payload = dict(payload)
     payload.setdefault("dodijeljeno_user_id", pm_user_id)
-    response = client.post("/api/maintenance-tasks", json=payload, headers=pm_headers)
+    response = client.post("/api/maintenance", json=payload, headers=pm_headers)
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -140,7 +140,7 @@ def test_create_task_with_mismatched_unit_and_property(client, pm_headers, pm_us
     unit_id = _create_unit(client, pm_headers, property_a)
 
     response = client.post(
-        "/api/maintenance-tasks",
+        "/api/maintenance",
         json={
             "naziv": "Popravak instalacija",
             "nekretnina_id": property_b,
@@ -169,7 +169,7 @@ def test_create_task_with_contract_from_other_property_is_rejected(
     )
 
     response = client.post(
-        "/api/maintenance-tasks",
+        "/api/maintenance",
         json={
             "naziv": "Koordinacija izvođača",
             "nekretnina_id": property_b,
@@ -210,9 +210,10 @@ def test_create_task_infers_relations_from_contract(client, pm_headers, pm_user_
     assert task["dodijeljeno_user_id"] == pm_user_id
 
 
-def test_assignment_requires_manager_role(client, admin_headers, pm_headers):
+def test_assignment_allows_any_active_user(client, admin_headers, pm_headers):
+    """Assignee role check was relaxed — any active user can be assigned."""
     property_id = _create_property(client, pm_headers, "Upravna zgrada")
-    unauthorized_user = _register_user(
+    regular_user = _register_user(
         client,
         admin_headers,
         email="user@example.com",
@@ -222,16 +223,16 @@ def test_assignment_requires_manager_role(client, admin_headers, pm_headers):
     )
 
     response = client.post(
-        "/api/maintenance-tasks",
+        "/api/maintenance",
         json={
             "naziv": "Servis kotla",
             "nekretnina_id": property_id,
-            "dodijeljeno_user_id": unauthorized_user["id"],
+            "dodijeljeno_user_id": regular_user["id"],
         },
         headers=pm_headers,
     )
-    assert response.status_code == 400
-    assert "Voditelj naloga" in response.json()["detail"]
+    assert response.status_code == 201
+    assert response.json()["dodijeljeno_user_id"] == regular_user["id"]
 
 
 def test_status_update_adds_activity(client, pm_headers, pm_user_id):
@@ -247,7 +248,7 @@ def test_status_update_adds_activity(client, pm_headers, pm_user_id):
     )
 
     response = client.patch(
-        f"/api/maintenance-tasks/{task['id']}",
+        f"/api/maintenance/{task['id']}",
         json={"status": "u_tijeku"},
         headers=pm_headers,
     )
@@ -272,7 +273,7 @@ def test_comment_endpoint_adds_activity(client, pm_headers, pm_user_id):
     )
 
     response = client.post(
-        f"/api/maintenance-tasks/{task['id']}/comments",
+        f"/api/maintenance/{task['id']}/comments",
         json={"poruka": "Kontaktiran izvođač", "autor": "Voditelj"},
         headers=pm_headers,
     )
@@ -315,7 +316,7 @@ def test_list_filters_by_priority_property_and_due_date(client, pm_headers, pm_u
     )
 
     response = client.get(
-        "/api/maintenance-tasks",
+        "/api/maintenance",
         params={
             "prioritet": "kriticno",
             "nekretnina_id": property_a,
@@ -331,7 +332,7 @@ def test_list_filters_by_priority_property_and_due_date(client, pm_headers, pm_u
     assert results[0]["prioritet"] == "kriticno"
 
     response = client.get(
-        "/api/maintenance-tasks",
+        "/api/maintenance",
         params={"q": "servis"},
         headers=pm_headers,
     )

@@ -43,12 +43,13 @@
 
 ## Infrastructure
 
-- [ ] Docker log rotation configured (`max-size: 50m, max-file: 5`)
-- [ ] SSL certificate auto-renewal (certbot timer or managed TLS)
+- [ ] Apache2 configured (`apache/riforma.conf` enabled)
+- [ ] Required Apache modules enabled: `proxy`, `proxy_http`, `rewrite`, `headers`, `deflate`
+- [ ] SSL certificate auto-renewal (certbot timer)
 - [ ] Uptime monitoring configured (health endpoint)
 - [ ] Log aggregation pipeline (JSON logs -> ELK/Loki/CloudWatch)
-- [ ] Firewall (UFW) active, only necessary ports open
-- [ ] Persistent disk for `/app/uploads` (Docker) or `/opt/riforma/uploads` (bare-metal)
+- [ ] Firewall (UFW) active, only necessary ports open (80, 443)
+- [ ] Uploads directory configured (`/opt/riforma/uploads`)
 
 ## Post-Deploy Verification
 
