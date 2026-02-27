@@ -6,7 +6,7 @@ export const getBackendUrl = () => {
   if (envUrl && envUrl.trim() !== "") {
     return envUrl.replace(/\/+$/, "");
   }
-  // Both dev (CRA proxy via setupProxy.js) and production (nginx) proxy
+  // Both dev (CRA proxy via setupProxy.js) and production (Apache) proxy
   // /api to the backend, so same-origin requests work everywhere.
   if (typeof window !== "undefined") {
     return "";

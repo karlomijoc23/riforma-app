@@ -14,7 +14,7 @@
 - **ORM**: SQLAlchemy 2.0 (`AsyncEngine`, declarative mappings, SQLModel patterns for Pydantic interop).
 - **Migrations**: Alembic (async configuration) with environment scripts wired to the new engine.
 - **Connection management**: Dependency-injected session factories + FastAPI lifespan hook for startup/teardown.
-- **Testing support**: Ephemeral MariaDB container via Docker Compose, plus sqlite-in-memory fallback for unit tests where possible.
+- **Testing support**: Ephemeral MariaDB container via Docker (for migration smoke tests), plus sqlite-in-memory fallback for unit tests where possible.
 
 ## 3. Current Collections → Target Tables
 
@@ -86,7 +86,7 @@
    - Map enums, indexes, constraints.
    - Document tenant scoping rules in SQL terms (row-level filters, partial indexes).
 2. **Infrastructure**
-   - Provision MariaDB dev instance (Docker Compose).
+   - Provision MariaDB dev instance (local install or Docker).
    - Add connection config, secrets handling for dev/prod.
    - Setup Alembic env & initial migration.
 3. **Implementation (per domain)**
@@ -114,7 +114,7 @@
 
 1. Review this blueprint with stakeholders; confirm scope and sequencing.
 2. Draft initial ERD and table DDLs (can be captured in `docs/persistence/erd.sql` or similar).
-3. Create MariaDB Docker Compose service for developers.
+3. Set up MariaDB dev instance (local install or Docker for testing).
 4. Scaffold SQLAlchemy base + Alembic configuration (no API changes yet).
 5. Implement `tenants`, `users`, `tenant_memberships` models and repositories as proof of concept.
 
