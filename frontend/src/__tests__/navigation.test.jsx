@@ -72,9 +72,7 @@ jest.mock("lucide-react", () => {
     X: icon("X"),
     Menu: icon("Menu"),
     Loader2: icon("Loader2"),
-    TrendingUp: icon("TrendingUp"),
-    Activity: icon("Activity"),
-    Truck: icon("Truck"),
+    Contact: icon("Contact"),
     AlertTriangle: icon("AlertTriangle"),
   };
 });
@@ -146,15 +144,12 @@ describe("Navigation", () => {
 
     expect(screen.getAllByText("Dashboard").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Nekretnine").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Zakupnici").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Kontakti").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Ugovori").length).toBeGreaterThanOrEqual(1);
     expect(
       screen.getAllByText("Odr\u017Eavanje").length,
     ).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Projekti").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Cijene").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Aktivnost").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Dobavljaci").length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders the logo image", () => {
