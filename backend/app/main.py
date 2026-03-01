@@ -88,13 +88,6 @@ async def run_scheduler():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic
-    # Always attempt to create tables (safe operation if they exist)
-    from app.db.base import Base
-    from app.db.session import get_engine
-
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
     # Seed admin if needed
     if (
@@ -208,7 +201,7 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):
     msg = str(exc)
-    if "tenant-scoped collection" in msg:
+    if "tenant-scoped" in msg and "without" in msg:
         return JSONResponse(
             status_code=403,
             content={

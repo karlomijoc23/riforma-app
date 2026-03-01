@@ -1137,11 +1137,11 @@ class RacuniRow(Base):
     tip_utroska: Mapped[str] = mapped_column(String(50), nullable=False)
     dobavljac: Mapped[str] = mapped_column(String(200), default="")
     broj_racuna: Mapped[str] = mapped_column(String(100), default="")
-    datum_racuna: Mapped[Optional[str]] = mapped_column(
-        String(20), nullable=True
+    datum_racuna: Mapped[Optional[date]] = mapped_column(
+        Date, nullable=True
     )
-    datum_dospijeca: Mapped[Optional[str]] = mapped_column(
-        String(20), nullable=True
+    datum_dospijeca: Mapped[Optional[date]] = mapped_column(
+        Date, nullable=True
     )
     iznos: Mapped[float] = mapped_column(Float, default=0.0)
     valuta: Mapped[str] = mapped_column(String(10), default="EUR")
@@ -1167,8 +1167,8 @@ class RacuniRow(Base):
         Text, nullable=True
     )
     napomena: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    period_od: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    period_do: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    period_od: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    period_do: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     potrosnja_kwh: Mapped[Optional[float]] = mapped_column(
         Float, nullable=True
     )

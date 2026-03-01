@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from app.api import deps
 from app.db.repositories.instance import property_units, ugovori, users
 from app.db.session import get_async_session_factory
+from app.db.transaction import db_transaction
 from app.models.domain import ApprovalStatus, PropertyUnitStatus, StatusUgovora
 from app.models.tables import UgovoriRow
 from app.services.approval_service import (
@@ -14,7 +15,7 @@ from app.services.approval_service import (
     get_approvers_for_scope,
     user_can_approve_leases,
 )
-from app.services.notification_service import send_email
+from app.core.email import send_email
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import or_, text
@@ -440,17 +441,18 @@ async def create_contract(
         approval_fields = build_approval_fields_for_create(current_user, "leases")
         item_data.update(approval_fields)
 
-        new_item = await ugovori.create(item_data)
+        # 4. Atomic: create contract + update unit status in one transaction
+        async with db_transaction() as txn:
+            new_item = await ugovori.create(item_data, session=txn)
 
-    # 4. Status Sync (Update Unit) — only if approved
-    if (
-        item_data.get("approval_status") == ApprovalStatus.APPROVED.value
-        and item_data.get("status") == StatusUgovora.AKTIVNO.value
-        and unit_id
-    ):
-        await property_units.update_by_id(
-            unit_id, {"status": PropertyUnitStatus.IZNAJMLJENO}
-        )
+            if (
+                item_data.get("approval_status") == ApprovalStatus.APPROVED.value
+                and item_data.get("status") == StatusUgovora.AKTIVNO.value
+                and unit_id
+            ):
+                await property_units.update_by_id(
+                    unit_id, {"status": PropertyUnitStatus.IZNAJMLJENO}, session=txn
+                )
 
     return ugovori.to_dict(new_item)
 

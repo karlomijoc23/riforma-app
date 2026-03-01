@@ -362,7 +362,10 @@ const RacuniPage = () => {
   };
 
   // Preknjizavanje quick actions
+  const [preknjizavanjeLoading, setPreknjizavanjeLoading] = useState(null);
   const handlePreknjizavanje = async (racun, status) => {
+    if (preknjizavanjeLoading) return;
+    setPreknjizavanjeLoading(racun.id);
     try {
       await api.updatePreknjizavanje(racun.id, {
         preknjizavanje_status: status,
@@ -374,6 +377,8 @@ const RacuniPage = () => {
     } catch (err) {
       console.error("Preknjizavanje error:", err);
       toast.error("Azuriranje preknjizavanja nije uspjelo");
+    } finally {
+      setPreknjizavanjeLoading(null);
     }
   };
 
@@ -612,6 +617,7 @@ const RacuniPage = () => {
                 size="icon"
                 className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
                 title="Zavrseno"
+                disabled={racun.preknjizavanje_status === "zavrseno" || preknjizavanjeLoading === racun.id}
                 onClick={() => handlePreknjizavanje(racun, "zavrseno")}
               >
                 <Check className="h-4 w-4" />
@@ -767,6 +773,7 @@ const RacuniPage = () => {
                 variant="outline"
                 size="sm"
                 className="h-7 text-emerald-600"
+                disabled={racun.preknjizavanje_status === "zavrseno" || preknjizavanjeLoading === racun.id}
                 onClick={() => handlePreknjizavanje(racun, "zavrseno")}
               >
                 <Check className="mr-1 h-3 w-3" /> Zavrseno

@@ -209,7 +209,7 @@ export const Navigation = () => {
                       setSearchOpen(false);
                       setSearchQuery("");
                       setSearchExpanded(false);
-                      navigate(meta.path);
+                      navigate(`${meta.path}/${item.id}`);
                     }}
                   >
                     <Icon className="h-4 w-4 text-muted-foreground shrink-0" />

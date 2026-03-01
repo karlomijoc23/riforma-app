@@ -2,7 +2,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from html import escape
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -22,7 +22,7 @@ from app.services.approval_service import (
     get_approvers_for_scope,
     user_can_approve_financials,
 )
-from app.services.notification_service import send_email
+from app.core.email import send_email
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
@@ -268,9 +268,9 @@ async def get_racuni(
     # Date range filter on datum_racuna via extra_conditions
     extra_conditions = []
     if period_od:
-        extra_conditions.append(RacuniRow.datum_racuna >= period_od)
+        extra_conditions.append(RacuniRow.datum_racuna >= date.fromisoformat(period_od))
     if period_do:
-        extra_conditions.append(RacuniRow.datum_racuna <= period_do)
+        extra_conditions.append(RacuniRow.datum_racuna <= date.fromisoformat(period_do))
 
     items, total = await racuni.find_many(
         filters=filters,
@@ -415,9 +415,9 @@ async def get_racuni_analytics(
 
     extra_conditions = []
     if period_od:
-        extra_conditions.append(RacuniRow.datum_racuna >= period_od)
+        extra_conditions.append(RacuniRow.datum_racuna >= date.fromisoformat(period_od))
     if period_do:
-        extra_conditions.append(RacuniRow.datum_racuna <= period_do)
+        extra_conditions.append(RacuniRow.datum_racuna <= date.fromisoformat(period_do))
 
     items = await racuni.find_all(
         filters=filters,
@@ -502,7 +502,6 @@ async def get_tax_summary(
 ):
     """Tax summary for a given year."""
     target_year = year or datetime.now().year
-    year_str = str(target_year)
 
     all_racuni = await racuni.find_all()
     all_ugovori = await ugovori.find_all()
@@ -510,9 +509,9 @@ async def get_tax_summary(
     # Income from contracts active in target year
     total_income = 0
     for u in all_ugovori:
-        start = u.datum_pocetka or ""
-        end = u.datum_zavrsetka or ""
-        if start and start[:4] <= year_str and (not end or end[:4] >= year_str):
+        start = u.datum_pocetka
+        end = u.datum_zavrsetka
+        if start and start.year <= target_year and (not end or end.year >= target_year):
             monthly = float(u.osnovna_zakupnina or 0) + float(
                 u.cam_troskovi or 0
             )
@@ -522,8 +521,7 @@ async def get_tax_summary(
     total_expenses = 0
     expense_by_type = {}
     for r in all_racuni:
-        datum = r.datum_racuna or ""
-        if datum and datum[:4] == year_str:
+        if r.datum_racuna and r.datum_racuna.year == target_year:
             iznos = float(r.iznos or 0)
             total_expenses += iznos
             tip = r.tip_utroska or "ostalo"
@@ -629,6 +627,9 @@ async def update_preknjizavanje(
         PreknjizavanjeStatus(data.preknjizavanje_status)
     except ValueError:
         raise HTTPException(status_code=422, detail="Nevazeci status preknjizavanja")
+
+    if item.preknjizavanje_status == "zavrseno" and data.preknjizavanje_status == "zavrseno":
+        raise HTTPException(status_code=422, detail="Preknjizavanje je vec zavrseno")
 
     update_dict = {
         "preknjizavanje_status": data.preknjizavanje_status,

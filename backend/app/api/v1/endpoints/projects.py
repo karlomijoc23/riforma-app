@@ -11,6 +11,7 @@ from app.db.repositories.instance import (
     project_stakeholders,
     project_transactions,
 )
+from app.db.transaction import db_transaction
 from app.models.domain import (
     Project,
     ProjectDocument,
@@ -358,10 +359,11 @@ async def add_project_transaction(
     tx_data = transaction.model_dump()
     tx_data["project_id"] = id
 
-    await project_transactions.create(tx_data)
-    await projekti.update_by_id(
-        id, {"spent": current_spent, "updated_at": datetime.now(timezone.utc)}
-    )
+    async with db_transaction() as txn:
+        await project_transactions.create(tx_data, session=txn)
+        await projekti.update_by_id(
+            id, {"spent": current_spent, "updated_at": datetime.now(timezone.utc)}, session=txn
+        )
 
     updated = await projekti.get_by_id(id)
     return await _build_project_response(updated)

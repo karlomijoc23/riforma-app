@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, Dict, Generic, List, Optional, Tuple, Type, TypeVar
@@ -83,20 +84,37 @@ class BaseRepository(Generic[T]):
         return data
 
     # ------------------------------------------------------------------
+    # Session helpers
+    # ------------------------------------------------------------------
+
+    @asynccontextmanager
+    async def _get_session(self, external_session: Optional[AsyncSession] = None):
+        """Yield an external session if provided, otherwise create a new one."""
+        if external_session is not None:
+            yield external_session
+        else:
+            async with self._session_factory() as session:
+                yield session
+
+    # ------------------------------------------------------------------
     # Read operations
     # ------------------------------------------------------------------
 
-    async def get_by_id(self, id: str) -> Optional[T]:
+    async def get_by_id(
+        self, id: str, *, session: Optional[AsyncSession] = None
+    ) -> Optional[T]:
         """Get a single record by primary key, respecting tenant scope."""
-        async with self._session_factory() as session:
+        async with self._get_session(session) as s:
             stmt = select(self.model).where(self.model.id == id)
             stmt = self._apply_tenant_filter(stmt)
-            result = await session.execute(stmt)
+            result = await s.execute(stmt)
             return result.scalar_one_or_none()
 
     async def find_one(
         self,
         extra_conditions: Optional[list] = None,
+        *,
+        session: Optional[AsyncSession] = None,
         **filters: Any,
     ) -> Optional[T]:
         """Find a single record matching the given keyword filters.
@@ -108,7 +126,7 @@ class BaseRepository(Generic[T]):
         **filters:
             Simple ``column=value`` equality filters.
         """
-        async with self._session_factory() as session:
+        async with self._get_session(session) as s:
             stmt = select(self.model)
             for key, value in filters.items():
                 stmt = stmt.where(getattr(self.model, key) == value)
@@ -116,7 +134,7 @@ class BaseRepository(Generic[T]):
                 for cond in extra_conditions:
                     stmt = stmt.where(cond)
             stmt = self._apply_tenant_filter(stmt)
-            result = await session.execute(stmt)
+            result = await s.execute(stmt)
             return result.scalar_one_or_none()
 
     async def find_many(
@@ -254,32 +272,42 @@ class BaseRepository(Generic[T]):
     # Write operations
     # ------------------------------------------------------------------
 
-    async def create(self, data: Dict[str, Any]) -> T:
+    async def create(
+        self, data: Dict[str, Any], *, session: Optional[AsyncSession] = None
+    ) -> T:
         """Insert a new record. Returns the created ORM instance."""
         data = self._normalize_data(data)
         data = self._ensure_tenant_id(data)
-        async with self._session_factory() as session:
+        async with self._get_session(session) as s:
             instance = self.model(**data)
-            session.add(instance)
-            await session.commit()
-            await session.refresh(instance)
+            s.add(instance)
+            if session is not None:
+                await s.flush()
+            else:
+                await s.commit()
+                await s.refresh(instance)
             return instance
 
-    async def update_by_id(self, id: str, data: Dict[str, Any]) -> Optional[T]:
+    async def update_by_id(
+        self, id: str, data: Dict[str, Any], *, session: Optional[AsyncSession] = None
+    ) -> Optional[T]:
         """Update a record by primary key. Returns the updated instance or ``None``."""
         data = self._normalize_data(data)
-        async with self._session_factory() as session:
+        async with self._get_session(session) as s:
             stmt = select(self.model).where(self.model.id == id)
             stmt = self._apply_tenant_filter(stmt)
-            result = await session.execute(stmt)
+            result = await s.execute(stmt)
             instance = result.scalar_one_or_none()
             if not instance:
                 return None
             for key, value in data.items():
                 if hasattr(instance, key):
                     setattr(instance, key, value)
-            await session.commit()
-            await session.refresh(instance)
+            if session is not None:
+                await s.flush()
+            else:
+                await s.commit()
+                await s.refresh(instance)
             return instance
 
     async def update_many(
@@ -314,26 +342,33 @@ class BaseRepository(Generic[T]):
             await session.commit()
             return result.rowcount
 
-    async def delete_by_id(self, id: str) -> bool:
+    async def delete_by_id(
+        self, id: str, *, session: Optional[AsyncSession] = None
+    ) -> bool:
         """Delete a record by primary key. Returns ``True`` if a row was deleted."""
-        async with self._session_factory() as session:
+        async with self._get_session(session) as s:
             stmt = select(self.model).where(self.model.id == id)
             stmt = self._apply_tenant_filter(stmt)
-            result = await session.execute(stmt)
+            result = await s.execute(stmt)
             instance = result.scalar_one_or_none()
             if not instance:
                 return False
-            await session.delete(instance)
-            await session.commit()
+            await s.delete(instance)
+            if session is not None:
+                await s.flush()
+            else:
+                await s.commit()
             return True
 
     async def delete_many(
         self,
         filters: Optional[Dict[str, Any]] = None,
         extra_conditions: Optional[list] = None,
+        *,
+        session: Optional[AsyncSession] = None,
     ) -> int:
         """Bulk-delete records matching filters. Returns count of deleted rows."""
-        async with self._session_factory() as session:
+        async with self._get_session(session) as s:
             conditions: list = []
             if filters:
                 for key, value in filters.items():
@@ -343,18 +378,22 @@ class BaseRepository(Generic[T]):
                 conditions.extend(extra_conditions)
             if self.tenant_scoped:
                 tenant_id = self._get_tenant_id()
-                if tenant_id:
-                    conditions.append(self.model.tenant_id == tenant_id)
+                if not tenant_id:
+                    raise ValueError("Cannot delete tenant-scoped rows without tenant")
+                conditions.append(self.model.tenant_id == tenant_id)
             # Select then delete to trigger cascade / ORM events
             stmt = select(self.model)
             if conditions:
                 stmt = stmt.where(and_(*conditions))
-            result = await session.execute(stmt)
+            result = await s.execute(stmt)
             rows = list(result.scalars().all())
             for row in rows:
-                await session.delete(row)
+                await s.delete(row)
             if rows:
-                await session.commit()
+                if session is not None:
+                    await s.flush()
+                else:
+                    await s.commit()
             return len(rows)
 
     # ------------------------------------------------------------------

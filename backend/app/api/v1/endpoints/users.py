@@ -7,6 +7,7 @@ from app.api import deps
 from app.core.roles import resolve_membership_role, resolve_role_scopes
 from app.core.security import hash_password
 from app.db.repositories.instance import users, tenant_memberships, saas_tenants
+from app.db.transaction import db_transaction
 from app.models.domain import User, UserMembershipDisplay, UserPublic
 from app.models.tables import UserRow
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -239,10 +240,9 @@ async def delete_user(
     if not user_row:
         raise HTTPException(status_code=404, detail="Korisnik nije pronađen")
 
-    # Delete memberships first
-    await tenant_memberships.delete_many(filters={"user_id": id})
-
-    # Delete user
-    await users.delete_by_id(id)
+    # Delete memberships + user atomically
+    async with db_transaction() as txn:
+        await tenant_memberships.delete_many(filters={"user_id": id}, session=txn)
+        await users.delete_by_id(id, session=txn)
 
     return {"message": "Korisnik uspješno obrisan"}

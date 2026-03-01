@@ -1,47 +1,12 @@
 import logging
-import smtplib
 from datetime import date, timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from html import escape
 
-from app.core.config import get_settings
+from app.core.email import send_email
 from app.db.repositories.instance import ugovori, racuni, maintenance_tasks, users
 from app.models.tables import UgovoriRow, RacuniRow, MaintenanceTaskRow, UserRow
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
-
-
-async def send_email(to: str, subject: str, html_body: str) -> bool:
-    """Send an email using SMTP settings from env."""
-    try:
-        smtp_host = getattr(settings, "SMTP_HOST", None)
-        smtp_port = getattr(settings, "SMTP_PORT", 587)
-        smtp_user = getattr(settings, "SMTP_USER", None)
-        smtp_pass = getattr(settings, "SMTP_PASSWORD", None)
-        from_email = getattr(settings, "SMTP_FROM", smtp_user)
-
-        if not smtp_host or not smtp_user:
-            logger.warning("SMTP not configured, skipping email to %s: %s", to, subject)
-            return False
-
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = from_email
-        msg["To"] = to
-        msg.attach(MIMEText(html_body, "html"))
-
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(from_email, [to], msg.as_string())
-
-        logger.info("Email sent to %s: %s", to, subject)
-        return True
-    except Exception as e:
-        logger.error("Failed to send email to %s: %s", to, e)
-        return False
 
 
 async def notify_expiring_contracts():
@@ -126,11 +91,11 @@ async def notify_expiring_contracts():
 
 async def notify_overdue_bills():
     """Send notifications for overdue unpaid bills."""
-    today_str = date.today().isoformat()
+    today = date.today()
 
     overdue = await racuni.find_all(extra_conditions=[
         RacuniRow.status_placanja.in_(["ceka_placanje", "djelomicno_placeno"]),
-        RacuniRow.datum_dospijeca < today_str,
+        RacuniRow.datum_dospijeca < today,
     ])
 
     if not overdue:
