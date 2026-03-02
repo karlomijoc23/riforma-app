@@ -50,7 +50,7 @@ describe("getBackendUrl", () => {
     expect(result).toBe("");
   });
 
-  it("detects dev server on port 3000 and returns backend on port 8000", () => {
+  it("returns empty string in browser when no env var is set (proxy mode)", () => {
     delete process.env.REACT_APP_BACKEND_URL;
 
     // Mock window.location for port 3000
@@ -61,10 +61,10 @@ describe("getBackendUrl", () => {
       hostname: "localhost",
     };
 
-    // Re-import to pick up new environment
+    // Proxy-based routing: same-origin requests, so always ""
     jest.isolateModules(() => {
       const { getBackendUrl } = require("../shared/api");
-      expect(getBackendUrl()).toBe("http://localhost:8000");
+      expect(getBackendUrl()).toBe("");
     });
   });
 
