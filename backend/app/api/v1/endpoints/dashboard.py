@@ -1,7 +1,6 @@
 import asyncio
 import time
 from collections import defaultdict
-from datetime import date, datetime
 from typing import Any, Dict, List, Tuple
 
 from app.api import deps
@@ -40,23 +39,25 @@ async def get_dashboard_stats(
         if cached and (time.monotonic() - cached[0]) < _CACHE_TTL_SECONDS:
             return cached[1]
 
-        # -- Load all data in parallel -------------------------------------
+        # -- Load all data in parallel (SQL aggregations) -------------------
         (
             total_properties,
             total_zakupnici,
             status_breakdown_raw,
             income_result,
-            all_contracts_rows,
+            portfolio_value,
+            expiring_soon,
+            active_unit_id_set,
             all_properties_rows,
-            all_units_rows,
         ) = await asyncio.gather(
             nekretnine.count(),
             zakupnici.count(),
             ugovori.status_breakdown(),
             ugovori.active_monthly_income(),
-            ugovori.find_all(),
+            nekretnine.portfolio_value(),
+            ugovori.expiring_soon(days=90),
+            ugovori.active_unit_ids(),
             nekretnine.find_all(),
-            property_units.find_all(),
         )
         property_map = {p.id: p for p in all_properties_rows}
 
@@ -64,11 +65,6 @@ async def get_dashboard_stats(
         status_breakdown: Dict[str, int] = defaultdict(int, status_breakdown_raw)
         active_contracts = status_breakdown.get("aktivno", 0)
         expiring_contracts = status_breakdown.get("na_isteku", 0)
-
-        # Build active contracts list for occupancy/expiring-soon (still needed)
-        active_contracts_list: List[Any] = [
-            c for c in all_contracts_rows if (c.status or "") == "aktivno"
-        ]
 
         # -- Monthly income (from SQL) -------------------------------------
         monthly_income, revenue_by_prop = income_result
@@ -81,71 +77,26 @@ async def get_dashboard_stats(
             revenue_by_property.append({"id": prop_id, "naziv": naziv, "prihod": prihod})
         revenue_by_property.sort(key=lambda x: x["prihod"], reverse=True)
 
-        # -- Portfolio value -----------------------------------------------
-        portfolio_value = 0.0
-        for p in all_properties_rows:
-            try:
-                portfolio_value += float(p.trzisna_vrijednost or 0)
-            except (ValueError, TypeError):
-                pass
-
+        # -- ROI -----------------------------------------------------------
         annual_yield = monthly_income * 12
         roi_percentage = 0.0
         if portfolio_value > 0:
             roi_percentage = (annual_yield / portfolio_value) * 100
 
-        # -- Occupancy (najamni_kapacitet) ---------------------------------
-        units_by_property: Dict[str, List[Any]] = defaultdict(list)
-        for u in all_units_rows:
-            pid = u.nekretnina_id
-            if pid:
-                units_by_property[pid].append(u)
-
-        active_unit_ids: set = set()
-        for c in active_contracts_list:
-            uid = c.property_unit_id
-            if uid:
-                active_unit_ids.add(uid)
-
-        active_property_ids: set = set()
-        for c in active_contracts_list:
-            pid = c.nekretnina_id
-            if pid:
-                active_property_ids.add(pid)
-
-        total_units = len(all_units_rows)
-        occupied_units = sum(
-            1
-            for u in all_units_rows
-            if (u.status or "") in ("zauzeto", "occupied", "iznajmljeno")
-            or u.id in active_unit_ids
+        # -- Occupancy (najamni_kapacitet) — via repository ----------------
+        total_units, occupied_units, by_property_raw = (
+            await property_units.occupancy_stats(active_unit_id_set)
         )
         occupancy_rate = (
             round((occupied_units / total_units * 100), 1) if total_units > 0 else 0.0
         )
 
+        # Enrich by_property with property names
         by_property = []
-        for prop_id, units_list in units_by_property.items():
-            prop = property_map.get(prop_id)
-            naziv = prop.naziv if prop else "Nepoznato"
-            t = len(units_list)
-            o = sum(
-                1
-                for u in units_list
-                if (u.status or "") in ("zauzeto", "occupied", "iznajmljeno")
-                or u.id in active_unit_ids
-            )
-            rate = round((o / t * 100), 1) if t > 0 else 0.0
-            by_property.append(
-                {
-                    "id": prop_id,
-                    "naziv": naziv,
-                    "total_units": t,
-                    "occupied_units": o,
-                    "occupancy_rate": rate,
-                }
-            )
-        by_property.sort(key=lambda x: x["total_units"], reverse=True)
+        for item in by_property_raw:
+            prop = property_map.get(item["id"])
+            item["naziv"] = prop.naziv if prop else "Nepoznato"
+            by_property.append(item)
 
         najamni_kapacitet = {
             "total_units": total_units,
@@ -153,41 +104,6 @@ async def get_dashboard_stats(
             "occupancy_rate": occupancy_rate,
             "by_property": by_property,
         }
-
-        # -- Expiring soon (contracts expiring in next 90 days) ------------
-        today = date.today()
-        expiring_soon = []
-        for c in all_contracts_rows:
-            if (c.status or "") not in ("aktivno", "na_isteku"):
-                continue
-            datum_zavrsetka = c.datum_zavrsetka
-            if not datum_zavrsetka:
-                continue
-            try:
-                if isinstance(datum_zavrsetka, datetime):
-                    end_date = datum_zavrsetka.date()
-                elif isinstance(datum_zavrsetka, date):
-                    end_date = datum_zavrsetka
-                else:
-                    continue
-            except (ValueError, TypeError):
-                continue
-
-            days_left = (end_date - today).days
-            if 0 <= days_left <= 90:
-                expiring_soon.append(
-                    {
-                        "id": c.id,
-                        "interna_oznaka": c.interna_oznaka or "\u2014",
-                        "zakupnik_id": c.zakupnik_id,
-                        "nekretnina_id": c.nekretnina_id,
-                        "datum_zavrsetka": str(end_date),
-                        "osnovna_zakupnina": c.osnovna_zakupnina or 0,
-                        "days_left": days_left,
-                        "status": c.status,
-                    }
-                )
-        expiring_soon.sort(key=lambda x: x["days_left"])
 
         # -- Maintenance ---------------------------------------------------
         (

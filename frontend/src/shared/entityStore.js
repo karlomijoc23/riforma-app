@@ -78,32 +78,33 @@ export const EntityStoreProvider = ({ children }) => {
   }, [tenantId]);
 
   const fetchNekretnine = useCallback(async () => {
+    const signal = abortRef.current.signal;
     try {
-      const res = await api.getNekretnine();
+      const res = await api.getNekretnine({ signal });
       const nekData = res.data || [];
       setState((prev) => ({ ...prev, nekretnine: nekData }));
-      const unitsRes = await api.getUnits();
+      const unitsRes = await api.getUnits({ signal });
       setState((prev) => ({ ...prev, propertyUnits: unitsRes.data || [] }));
       loadedRef.current.nekretnine = true;
       loadedRef.current.propertyUnits = true;
     } catch (err) {
-      console.error("Error fetching properties:", err);
+      if (err?.name !== "CanceledError") console.error("Error fetching properties:", err);
     }
   }, []);
 
   const fetchZakupnici = useCallback(async () => {
     try {
-      const res = await api.getZakupnici();
+      const res = await api.getZakupnici({ signal: abortRef.current.signal });
       setState((prev) => ({ ...prev, zakupnici: res.data || [] }));
       loadedRef.current.zakupnici = true;
     } catch (err) {
-      console.error("Error fetching tenants:", err);
+      if (err?.name !== "CanceledError") console.error("Error fetching tenants:", err);
     }
   }, []);
 
   const fetchUgovori = useCallback(async () => {
     try {
-      const res = await api.getUgovori();
+      const res = await api.getUgovori({ signal: abortRef.current.signal });
       const ugovoriData = res.data || [];
       setState((prev) => {
         const enhancedUgovori = ugovoriData.map((ugovor) => {
@@ -121,37 +122,37 @@ export const EntityStoreProvider = ({ children }) => {
       });
       loadedRef.current.ugovori = true;
     } catch (err) {
-      console.error("Error fetching contracts:", err);
+      if (err?.name !== "CanceledError") console.error("Error fetching contracts:", err);
     }
   }, []);
 
   const fetchDokumenti = useCallback(async () => {
     try {
-      const res = await api.getDokumenti();
+      const res = await api.getDokumenti({ signal: abortRef.current.signal });
       setState((prev) => ({ ...prev, dokumenti: res.data || [] }));
       loadedRef.current.dokumenti = true;
     } catch (err) {
-      console.error("Error fetching documents:", err);
+      if (err?.name !== "CanceledError") console.error("Error fetching documents:", err);
     }
   }, []);
 
   const fetchMaintenanceTasks = useCallback(async () => {
     try {
-      const res = await api.getMaintenanceTasks();
+      const res = await api.getMaintenanceTasks({ signal: abortRef.current.signal });
       setState((prev) => ({ ...prev, maintenanceTasks: res.data || [] }));
       loadedRef.current.maintenanceTasks = true;
     } catch (err) {
-      console.error("Error fetching maintenance tasks:", err);
+      if (err?.name !== "CanceledError") console.error("Error fetching maintenance tasks:", err);
     }
   }, []);
 
   const fetchRacuni = useCallback(async () => {
     try {
-      const res = await api.getRacuni();
+      const res = await api.getRacuni({ signal: abortRef.current.signal });
       setState((prev) => ({ ...prev, racuni: res.data || [] }));
       loadedRef.current.racuni = true;
     } catch (err) {
-      console.error("Error fetching bills:", err);
+      if (err?.name !== "CanceledError") console.error("Error fetching bills:", err);
     }
   }, []);
 
