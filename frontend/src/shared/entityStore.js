@@ -42,6 +42,8 @@ export const EntityStoreProvider = ({ children }) => {
   });
   // Track in-flight promises to avoid duplicate requests
   const inflightRef = useRef({});
+  // AbortController to cancel in-flight requests on tenant switch
+  const abortRef = useRef(new AbortController());
 
   useEffect(() => {
     const unsubscribe = subscribeToTenantChanges((nextTenantId) => {
@@ -50,8 +52,10 @@ export const EntityStoreProvider = ({ children }) => {
     return unsubscribe;
   }, []);
 
-  // Reset on tenant change
+  // Reset on tenant change — abort in-flight requests from the old tenant
   useEffect(() => {
+    abortRef.current.abort();
+    abortRef.current = new AbortController();
     loadedRef.current = {
       nekretnine: false,
       zakupnici: false,
@@ -189,15 +193,17 @@ export const EntityStoreProvider = ({ children }) => {
   // Full refresh — reload everything (used by mutation events and manual refresh)
   const loadEntities = useCallback(async () => {
     setLoading(true);
+    const signal = abortRef.current.signal;
     try {
+      const opts = { signal };
       const results = await Promise.allSettled([
-        api.getNekretnine(),
-        api.getZakupnici(),
-        api.getUgovori(),
-        api.getDokumenti(),
-        api.getUnits(),
-        api.getMaintenanceTasks(),
-        api.getRacuni(),
+        api.getNekretnine(opts),
+        api.getZakupnici(opts),
+        api.getUgovori(opts),
+        api.getDokumenti(opts),
+        api.getUnits(opts),
+        api.getMaintenanceTasks(opts),
+        api.getRacuni(opts),
       ]);
 
       const extract = (r) =>

@@ -1,5 +1,9 @@
 """Concrete repository classes for each domain entity."""
 
+from typing import Dict, Tuple
+
+from sqlalchemy import func, select
+
 from app.db.repositories.base import BaseRepository
 from app.models.tables import (
     ActivityLogRow,
@@ -79,6 +83,38 @@ class ZakupniciRepository(BaseRepository[ZakupniciRow]):
 class UgovoriRepository(BaseRepository[UgovoriRow]):
     model = UgovoriRow
     tenant_scoped = True
+
+    async def status_breakdown(self) -> Dict[str, int]:
+        """Return {status: count} using SQL GROUP BY instead of Python loops."""
+        async with self._session_factory() as session:
+            stmt = (
+                select(
+                    UgovoriRow.status,
+                    func.count().label("cnt"),
+                )
+                .group_by(UgovoriRow.status)
+            )
+            stmt = self._apply_tenant_filter(stmt)
+            result = await session.execute(stmt)
+            return {row[0] or "nepoznato": row[1] for row in result.all()}
+
+    async def active_monthly_income(self) -> Tuple[float, Dict[str, float]]:
+        """Return (total_monthly_income, {nekretnina_id: income}) via SQL."""
+        async with self._session_factory() as session:
+            stmt = (
+                select(
+                    UgovoriRow.nekretnina_id,
+                    func.coalesce(func.sum(UgovoriRow.osnovna_zakupnina), 0).label("income"),
+                )
+                .where(UgovoriRow.status == "aktivno")
+                .group_by(UgovoriRow.nekretnina_id)
+            )
+            stmt = self._apply_tenant_filter(stmt)
+            result = await session.execute(stmt)
+            rows = result.all()
+            total = sum(float(r[1]) for r in rows)
+            by_property = {r[0]: float(r[1]) for r in rows if r[0]}
+            return total, by_property
 
 
 class DokumentiRepository(BaseRepository[DokumentiRow]):

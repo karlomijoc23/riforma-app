@@ -197,10 +197,18 @@ class BaseRepository(Generic[T]):
             total_result = await session.execute(count_stmt)
             total = total_result.scalar() or 0
 
-            # Ordering
-            if order_by and hasattr(self.model, order_by):
-                col = getattr(self.model, order_by)
-                stmt = stmt.order_by(desc(col) if order_dir == "desc" else asc(col))
+            # Ordering — support "-column" / "+column" prefix syntax
+            if order_by:
+                _stripped = order_by.lstrip("-+")
+                if order_by.startswith("-"):
+                    order_dir = "desc"
+                elif order_by.startswith("+"):
+                    order_dir = "asc"
+                if hasattr(self.model, _stripped):
+                    col = getattr(self.model, _stripped)
+                    stmt = stmt.order_by(desc(col) if order_dir == "desc" else asc(col))
+                elif hasattr(self.model, "created_at"):
+                    stmt = stmt.order_by(desc(self.model.created_at))
             elif hasattr(self.model, "created_at"):
                 stmt = stmt.order_by(desc(self.model.created_at))
 
@@ -260,9 +268,18 @@ class BaseRepository(Generic[T]):
             if conditions:
                 stmt = stmt.where(and_(*conditions))
             stmt = self._apply_tenant_filter(stmt)
-            if order_by and hasattr(self.model, order_by):
-                col = getattr(self.model, order_by)
-                stmt = stmt.order_by(desc(col) if order_dir == "desc" else asc(col))
+            # Support "-column" / "+column" prefix syntax
+            if order_by:
+                _stripped = order_by.lstrip("-+")
+                if order_by.startswith("-"):
+                    order_dir = "desc"
+                elif order_by.startswith("+"):
+                    order_dir = "asc"
+                if hasattr(self.model, _stripped):
+                    col = getattr(self.model, _stripped)
+                    stmt = stmt.order_by(desc(col) if order_dir == "desc" else asc(col))
+                elif hasattr(self.model, "created_at"):
+                    stmt = stmt.order_by(desc(self.model.created_at))
             elif hasattr(self.model, "created_at"):
                 stmt = stmt.order_by(desc(self.model.created_at))
             result = await session.execute(stmt)

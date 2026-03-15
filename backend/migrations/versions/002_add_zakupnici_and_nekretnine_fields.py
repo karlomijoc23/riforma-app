@@ -18,13 +18,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # ------------------------------------------------------------------
-    # nekretnine: add grad column
-    # ------------------------------------------------------------------
-    op.add_column(
-        "nekretnine",
-        sa.Column("grad", sa.String(200), nullable=True),
-    )
+    # NOTE: nekretnine.grad column is already created in 001_initial_schema.
+    # The original add_column("nekretnine", "grad") was removed because it
+    # would fail on a fresh install (duplicate column).
 
     # ------------------------------------------------------------------
     # zakupnici: make oib nullable (was NOT NULL)
@@ -174,5 +170,4 @@ def downgrade() -> None:
         nullable=False,
     )
 
-    # nekretnine: remove grad
-    op.drop_column("nekretnine", "grad")
+    # NOTE: nekretnine.grad is part of 001_initial_schema — not dropped here.

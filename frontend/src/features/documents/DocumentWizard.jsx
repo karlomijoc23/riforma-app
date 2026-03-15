@@ -26,6 +26,8 @@ import { parseNumericValue } from "../../shared/formatters";
 import UploadStep from "./steps/UploadStep";
 import MetaStep from "./steps/MetaStep";
 import LinkingStep from "./steps/LinkingStep";
+import useWizardSteps from "./useWizardSteps";
+import useDocumentSubmit from "./useDocumentSubmit";
 import ManualUnitForm from "./components/ManualUnitForm";
 import NekretninarForm from "../properties/NekretninarForm";
 import ZakupnikForm from "../tenants/ZakupnikForm";
@@ -47,11 +49,7 @@ export const useDocumentWizard = () => {
   return context;
 };
 
-const steps = [
-  { id: "upload", title: "Učitaj dokument", component: UploadStep },
-  { id: "meta", title: "Detalji", component: MetaStep },
-  { id: "linking", title: "Povezivanje", component: LinkingStep },
-];
+const STEP_COMPONENTS = [UploadStep, MetaStep, LinkingStep];
 
 const initialManualUnitState = {
   oznaka: "",
@@ -171,7 +169,16 @@ const DocumentWizard = ({
     contract: false,
     unit: false,
   });
-  const [activeStep, setActiveStep] = useState(0);
+  const {
+    steps: wizardSteps,
+    activeStep,
+    setActiveStep,
+    canProceedToNextStep,
+    handleNext,
+    handlePrev,
+    resetStep,
+    isLastStep,
+  } = useWizardSteps({ formData, uploadedFile });
   const [aiApplied, setAiApplied] = useState(true);
   const [hasAutoFocusedDescription, setHasAutoFocusedDescription] =
     useState(false);
@@ -652,7 +659,7 @@ const DocumentWizard = ({
       contract: false,
       unit: false,
     });
-    setActiveStep(0);
+    resetStep();
     setAiApplied(true);
     setHasAutoFocusedDescription(false);
     manualSnapshotRef.current = null;
@@ -1385,135 +1392,14 @@ const DocumentWizard = ({
     setManualUnitErrors({});
   }, []);
 
-  const canProceedToNextStep = useMemo(() => {
-    if (activeStep === 0) {
-      return Boolean(uploadedFile || formData.file || formData.id);
-    }
-    if (activeStep === 1) {
-      const metaFieldsValid = activeRequirements.metaFields.every((field) => {
-        if (!field.required) {
-          return true;
-        }
-        const value = formData.metadata?.[field.id];
-        return Boolean(String(value ?? "").trim());
-      });
-      return Boolean(formData.naziv.trim() && formData.tip && metaFieldsValid);
-    }
-    return true;
-  }, [
-    activeRequirements,
-    activeStep,
-    formData.file,
-    formData.id,
-    formData.metadata,
-    formData.naziv,
-    formData.tip,
-    uploadedFile,
-  ]);
+  const { handleSubmit } = useDocumentSubmit({
+    formData,
+    onSubmit,
+    onResetState: handleResetState,
+    setActiveStep,
+  });
 
-  const handleNext = useCallback(() => {
-    if (activeStep < steps.length - 1) {
-      setActiveStep((prev) => prev + 1);
-    }
-  }, [activeStep]);
-
-  const handlePrev = useCallback(() => {
-    if (activeStep > 0) {
-      setActiveStep((prev) => prev - 1);
-    }
-  }, [activeStep]);
-
-  const handleSubmit = useCallback(
-    async (event) => {
-      event.preventDefault();
-      const requirements = getDocumentRequirements(formData.tip);
-      if (!formData.file && !formData.id) {
-        toast.error("PDF dokument je obavezan. Učitajte PDF prije spremanja.");
-        return;
-      }
-      if (requirements.requireProperty && !formData.nekretnina_id) {
-        toast.error("Za ovaj tip dokumenta odaberite pripadajuću nekretninu.");
-        setActiveStep(2);
-        return;
-      }
-      if (
-        requirements.requireTenant &&
-        requirements.allowTenant &&
-        !formData.zakupnik_id
-      ) {
-        toast.error("Za ovaj tip dokumenta povežite zakupnika.");
-        setActiveStep(2);
-        return;
-      }
-      if (
-        requirements.requireContract &&
-        requirements.allowContract &&
-        !formData.ugovor_id
-      ) {
-        toast.error("Za ovaj tip dokumenta povežite ugovor.");
-        setActiveStep(2);
-        return;
-      }
-      const missingMeta = requirements.metaFields.find((field) => {
-        if (!field.required) {
-          return false;
-        }
-        const value = formData.metadata?.[field.id];
-        return !String(value ?? "").trim();
-      });
-      if (missingMeta) {
-        toast.error(`Popunite polje "${missingMeta.label}".`);
-        setActiveStep(1);
-        return;
-      }
-      try {
-        const metadataPayload = {};
-        for (const field of requirements.metaFields) {
-          const raw = formData.metadata?.[field.id];
-          if (raw === undefined || raw === null) {
-            continue;
-          }
-          if (typeof raw === "string") {
-            const trimmed = raw.trim();
-            if (!trimmed) {
-              continue;
-            }
-            if (field.type === "number") {
-              const numeric = Number(trimmed);
-              if (!Number.isNaN(numeric)) {
-                metadataPayload[field.id] = numeric;
-              }
-            } else {
-              metadataPayload[field.id] = trimmed;
-            }
-          } else {
-            metadataPayload[field.id] = raw;
-          }
-        }
-        await onSubmit({
-          ...formData,
-          nekretnina_id: formData.nekretnina_id || null,
-          zakupnik_id: requirements.allowTenant
-            ? formData.zakupnik_id || null
-            : null,
-          ugovor_id: requirements.allowContract
-            ? formData.ugovor_id || null
-            : null,
-          property_unit_id: requirements.allowPropertyUnit
-            ? formData.property_unit_id || null
-            : null,
-          metadata: metadataPayload,
-        });
-        handleResetState();
-      } catch (error) {
-        console.error("Greška pri spremanju dokumenta:", error);
-      }
-    },
-    [formData, handleResetState, onSubmit],
-  );
-
-  const currentStep = steps[activeStep];
-  const StepComponent = currentStep.component;
+  const StepComponent = STEP_COMPONENTS[activeStep];
 
   const contextValue = {
     formData,
@@ -1578,7 +1464,7 @@ const DocumentWizard = ({
         <div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              {steps.map((step, index) => (
+              {wizardSteps.map((step, index) => (
                 <React.Fragment key={step.id}>
                   <div
                     className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold ${
@@ -1600,7 +1486,7 @@ const DocumentWizard = ({
                   >
                     {step.title}
                   </span>
-                  {index < steps.length - 1 && (
+                  {index < wizardSteps.length - 1 && (
                     <span className="mx-2 h-px w-8 bg-border" aria-hidden />
                   )}
                 </React.Fragment>
@@ -1628,7 +1514,7 @@ const DocumentWizard = ({
                 Nazad
               </Button>
             )}
-            {activeStep < steps.length - 1 && (
+            {!isLastStep && (
               <Button
                 type="button"
                 onClick={handleNext}
@@ -1637,7 +1523,7 @@ const DocumentWizard = ({
                 Sljedeći korak
               </Button>
             )}
-            {activeStep === steps.length - 1 && (
+            {isLastStep && (
               <Button
                 type="submit"
                 disabled={loading}

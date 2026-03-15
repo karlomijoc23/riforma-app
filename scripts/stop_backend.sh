@@ -3,10 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PID_FILE="$ROOT_DIR/backend.pid"
-UVICORN_CMD="uvicorn server:app --reload --port 8000"
+UVICORN_PATTERN="uvicorn app.main:app"
 
-if pgrep -f "$UVICORN_CMD" > /dev/null 2>&1; then
-  pkill -f "$UVICORN_CMD" || true
+if pgrep -f "$UVICORN_PATTERN" > /dev/null 2>&1; then
+  pkill -f "$UVICORN_PATTERN" || true
 fi
 
 if [ -f "$PID_FILE" ]; then

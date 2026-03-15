@@ -54,6 +54,17 @@ def _sanitize_filename(filename: str) -> str:
     return filename
 
 
+def _normalize_file_path(item: dict) -> dict:
+    """Derive putanja_datoteke from file_path for consistent API responses."""
+    fp = item.get("file_path")
+    if fp:
+        if "uploads/" in fp:
+            item["putanja_datoteke"] = fp[fp.rfind("uploads/"):]
+        elif "uploads\\" in fp:
+            item["putanja_datoteke"] = fp[fp.rfind("uploads\\"):].replace("\\", "/")
+    return item
+
+
 # --------------- Models ---------------
 
 
@@ -280,7 +291,7 @@ async def get_racuni(
         skip=skip,
         limit=limit,
     )
-    return [racuni.to_dict(item) for item in items]
+    return [_normalize_file_path(racuni.to_dict(item)) for item in items]
 
 
 @router.post(
@@ -381,11 +392,6 @@ async def create_racun(
         "file_path": file_path,
         "original_filename": original_filename,
         "content_type": content_type,
-        "putanja_datoteke": (
-            f"uploads/{doc_id}_{_sanitize_filename(file.filename)}"
-            if file and file.filename
-            else None
-        ),
         "created_by": current_user["id"],
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
@@ -396,7 +402,7 @@ async def create_racun(
     doc_data.update(approval_fields)
 
     new_item = await racuni.create(doc_data)
-    return racuni.to_dict(new_item)
+    return _normalize_file_path(racuni.to_dict(new_item))
 
 
 @router.get(
@@ -549,7 +555,7 @@ async def get_racun(
     item = await racuni.get_by_id(id)
     if not item:
         raise HTTPException(status_code=404, detail="Racun nije pronadjen")
-    return racuni.to_dict(item)
+    return _normalize_file_path(racuni.to_dict(item))
 
 
 @router.put(

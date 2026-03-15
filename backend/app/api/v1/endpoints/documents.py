@@ -69,13 +69,15 @@ def _sanitize_filename(filename: str) -> str:
 
 
 def _normalize_file_path(item: dict) -> None:
-    """Normalize file_path to putanja_datoteke for consistent API responses."""
-    if "putanja_datoteke" not in item and item.get("file_path"):
-        fp = item["file_path"]
+    """Derive putanja_datoteke from file_path for consistent API responses."""
+    fp = item.get("file_path")
+    if fp:
         if "uploads/" in fp:
-            item["putanja_datoteke"] = fp[fp.rfind("uploads/") :]
+            item["putanja_datoteke"] = fp[fp.rfind("uploads/"):]
         elif "uploads\\" in fp:
-            item["putanja_datoteke"] = fp[fp.rfind("uploads\\") :].replace("\\", "/")
+            item["putanja_datoteke"] = fp[fp.rfind("uploads\\"):].replace("\\", "/")
+    elif not item.get("putanja_datoteke"):
+        item["putanja_datoteke"] = None
 
 
 class DocumentCreate(BaseModel):
@@ -137,17 +139,18 @@ async def create_document(
         tip_enum = TipDokumenta.OSTALO
 
     # Parse metadata
-    parsed_metadata = {}
+    parsed_metadata = None
     if metadata:
         import json
 
         try:
-            parsed_metadata = json.loads(metadata)
+            parsed_metadata = json.loads(metadata) or None
         except json.JSONDecodeError:
             raise HTTPException(status_code=422, detail="Metadata must be valid JSON")
 
     doc_id = str(uuid.uuid4())
     file_path = None
+    filename = None
 
     if file and file.filename:
         # Validate file extension
@@ -178,34 +181,62 @@ async def create_document(
 
         safe_filename = _sanitize_filename(file.filename)
         filename = f"{doc_id}_{safe_filename}"
-        settings.UPLOAD_DIR.mkdir(exist_ok=True)
+        try:
+            settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.error("Cannot create upload directory %s: %s", settings.UPLOAD_DIR, exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Nije moguće kreirati direktorij za upload: {exc}",
+            )
         dest_path = settings.UPLOAD_DIR / filename
 
-        with dest_path.open("wb") as buffer:
-            buffer.write(contents)
+        try:
+            with dest_path.open("wb") as buffer:
+                buffer.write(contents)
+        except OSError as exc:
+            logger.error("Cannot write file %s: %s", dest_path, exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Nije moguće spremiti datoteku na disk: {exc}",
+            )
 
         file_path = str(dest_path)
+
+    # Sanitize empty strings to None for FK fields
+    clean_nekretnina_id = nekretnina_id if nekretnina_id else None
+    clean_zakupnik_id = zakupnik_id if zakupnik_id else None
+    clean_ugovor_id = ugovor_id if ugovor_id else None
+    clean_maintenance_task_id = maintenance_task_id if maintenance_task_id else None
 
     doc_data = {
         "id": doc_id,
         "naziv": naziv,
         "tip": tip_enum.value,
         "opis": opis,
-        "nekretnina_id": nekretnina_id,
-        "zakupnik_id": zakupnik_id,
-        "ugovor_id": ugovor_id,
-        "maintenance_task_id": maintenance_task_id,
+        "nekretnina_id": clean_nekretnina_id,
+        "zakupnik_id": clean_zakupnik_id,
+        "ugovor_id": clean_ugovor_id,
+        "maintenance_task_id": clean_maintenance_task_id,
         "datum_isteka": datum_isteka,
         "metadata_json": parsed_metadata,
         "file_path": file_path,
         "original_filename": file.filename if file else None,
         "content_type": file.content_type if file else None,
         "created_by": current_user["id"],
-        "putanja_datoteke": f"uploads/{filename}" if file_path else None,
     }
 
-    instance = await dokumenti.create(doc_data)
-    return dokumenti.to_dict(instance)
+    try:
+        instance = await dokumenti.create(doc_data)
+    except Exception as exc:
+        logger.error("DB insert failed for document %s: %s", doc_id, exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Spremanje dokumenta u bazu nije uspjelo: {exc}",
+        )
+    result_dict = dokumenti.to_dict(instance)
+    _normalize_file_path(result_dict)
+    return result_dict
 
 
 @router.get(

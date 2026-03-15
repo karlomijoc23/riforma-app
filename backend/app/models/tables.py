@@ -66,17 +66,17 @@ class UserRow(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, nullable=True
+        DateTime(timezone=True), nullable=True
     )
     reset_token: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True
     )
     reset_token_expires: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, nullable=True
+        DateTime(timezone=True), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -104,8 +104,8 @@ class RevokedTokenRow(Base):
         String(255), unique=True, nullable=False, index=True
     )
     user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    revoked_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class SaasTenantRow(Base):
@@ -129,9 +129,9 @@ class SaasTenantRow(Base):
     created_by: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -209,9 +209,9 @@ class TenantMembershipRow(Base):
     role: Mapped[str] = mapped_column(String(50), default="member")
     status: Mapped[str] = mapped_column(String(50), default="active")
     invited_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -290,9 +290,9 @@ class NekretnineRow(Base):
     )
     has_parking: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -333,6 +333,10 @@ class PropertyUnitRow(Base):
 
     __tablename__ = "property_units"
 
+    __table_args__ = (
+        UniqueConstraint("nekretnina_id", "oznaka", name="uq_units_nekretnina_oznaka"),
+    )
+
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=_new_uuid
     )
@@ -352,9 +356,9 @@ class PropertyUnitRow(Base):
     )
     napomena: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -454,9 +458,9 @@ class ZakupniciRow(Base):
     tip: Mapped[str] = mapped_column(String(50), default="zakupnik")
     napomena: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -491,6 +495,8 @@ class UgovoriRow(Base):
             "interna_oznaka",
             "status",
         ),
+        Index("ix_ugovori_tenant_status", "tenant_id", "status"),
+        UniqueConstraint("tenant_id", "interna_oznaka", name="uq_ugovori_tenant_oznaka"),
     )
 
     id: Mapped[str] = mapped_column(
@@ -554,13 +560,13 @@ class UgovoriRow(Base):
         String(36), nullable=True
     )
     approved_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, nullable=True
+        DateTime(timezone=True), nullable=True
     )
     approval_comment: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True
     )
     submitted_for_approval_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, nullable=True
+        DateTime(timezone=True), nullable=True
     )
     submitted_by: Mapped[Optional[str]] = mapped_column(
         String(36), nullable=True
@@ -572,9 +578,9 @@ class UgovoriRow(Base):
     )
 
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -634,10 +640,10 @@ class DokumentiRow(Base):
         String(36), ForeignKey("ugovori.id", ondelete="SET NULL"), nullable=True, index=True
     )
     property_unit_id: Mapped[Optional[str]] = mapped_column(
-        String(36), nullable=True
+        String(36), ForeignKey("property_units.id", ondelete="SET NULL"), nullable=True
     )
     maintenance_task_id: Mapped[Optional[str]] = mapped_column(
-        String(36), nullable=True
+        String(36), ForeignKey("maintenance_tasks.id", ondelete="SET NULL"), nullable=True
     )
     datum_isteka: Mapped[Optional[str]] = mapped_column(
         String(20), nullable=True
@@ -658,9 +664,9 @@ class DokumentiRow(Base):
         String(1000), nullable=True
     )
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -682,6 +688,10 @@ class MaintenanceTaskRow(Base):
     """Maintenance tasks."""
 
     __tablename__ = "maintenance_tasks"
+
+    __table_args__ = (
+        Index("ix_maintenance_tenant_status", "tenant_id", "status"),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=_new_uuid
@@ -750,9 +760,9 @@ class MaintenanceTaskRow(Base):
     )
 
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -788,7 +798,7 @@ class ActivityLogRow(Base):
     tenant_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("saas_tenants.id"), nullable=True, index=True
     )
-    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     user: Mapped[str] = mapped_column(String(200), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False)
     actor_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
@@ -835,14 +845,17 @@ class ParkingSpaceRow(Base):
     nekretnina_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("nekretnine.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    zakupnik_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("zakupnici.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     floor: Mapped[str] = mapped_column(String(20), nullable=False)
     internal_id: Mapped[str] = mapped_column(String(100), nullable=False)
     vehicle_plates: Mapped[Any] = mapped_column(sa.JSON, default=list)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -875,7 +888,7 @@ class HandoverProtocolRow(Base):
         String(500), nullable=True
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
     # Relationships
@@ -913,9 +926,9 @@ class ProjektiRow(Base):
         String(36), ForeignKey("nekretnine.id", ondelete="SET NULL"), nullable=True
     )
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -998,7 +1011,7 @@ class ProjectStakeholderRow(Base):
         String(500), nullable=True
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
     project: Mapped["ProjektiRow"] = relationship(
@@ -1026,7 +1039,7 @@ class ProjectTransactionRow(Base):
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     paid_to: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
     project: Mapped["ProjektiRow"] = relationship(
@@ -1059,7 +1072,7 @@ class ProjectDocumentRow(Base):
         String(1000), nullable=True
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
     project: Mapped["ProjektiRow"] = relationship(
@@ -1112,9 +1125,9 @@ class TenantSettingsRow(Base):
     report_header_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     report_footer_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -1127,6 +1140,10 @@ class RacuniRow(Base):
     """Bills / invoices (racuni)."""
 
     __tablename__ = "racuni"
+
+    __table_args__ = (
+        Index("ix_racuni_tenant_status", "tenant_id", "status_placanja"),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=_new_uuid
@@ -1198,22 +1215,22 @@ class RacuniRow(Base):
         String(36), nullable=True
     )
     approved_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, nullable=True
+        DateTime(timezone=True), nullable=True
     )
     approval_comment: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True
     )
     submitted_for_approval_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, nullable=True
+        DateTime(timezone=True), nullable=True
     )
     submitted_by: Mapped[Optional[str]] = mapped_column(
         String(36), nullable=True
     )
 
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -1288,9 +1305,9 @@ class OglasiRow(Base):
         String(50), default="nacrt"
     )  # nacrt, aktivan, pauziran, arhiviran
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -1303,6 +1320,10 @@ class NotificationRow(Base):
     """In-app notifications."""
 
     __tablename__ = "notifications"
+
+    __table_args__ = (
+        Index("ix_notifications_user_read", "user_id", "read"),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=_new_uuid
@@ -1318,7 +1339,7 @@ class NotificationRow(Base):
         String(50), default="info"
     )  # info, warning, success, error
     read: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
     tenant: Mapped["SaasTenantRow"] = relationship(
@@ -1346,7 +1367,7 @@ class WebhookEventRow(Base):
     status: Mapped[str] = mapped_column(String(50), default="received")
     processed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
     tenant: Mapped["SaasTenantRow"] = relationship(lazy="noload")
@@ -1367,9 +1388,9 @@ class AiConversationRow(Base):
         String(36), ForeignKey("users.id"), nullable=False, index=True
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships
@@ -1402,7 +1423,7 @@ class AiMessageRow(Base):
     pending_action: Mapped[Optional[Any]] = mapped_column(
         sa.JSON, nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
     conversation: Mapped["AiConversationRow"] = relationship(
@@ -1431,9 +1452,9 @@ class DobavljaciRow(Base):
     napomena: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     ocjena: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
     # Relationships

@@ -115,11 +115,9 @@ const UgovorDetailPage = () => {
         if (fromStore) {
           setContract(fromStore);
         } else {
-          // Deep-link fallback: fetch all contracts (no single-contract endpoint)
-          const res = await api.getUgovori();
-          const all = res.data || [];
-          const found = all.find((u) => String(u.id) === String(id));
-          setContract(found || null);
+          // Deep-link fallback: fetch single contract by ID
+          const res = await api.getUgovor(id);
+          setContract(res.data || null);
         }
       } catch (err) {
         console.error("Failed to load contract", err);

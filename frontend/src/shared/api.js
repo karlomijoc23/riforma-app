@@ -229,15 +229,17 @@ export const api = {
   updateTenant: (id, data) => apiClient.put(`${API_ROOT}/tenants/${id}`, data),
   deleteTenant: (id) => apiClient.delete(`${API_ROOT}/tenants/${id}`),
 
-  getNekretnine: () => apiClient.get(`${API_ROOT}/nekretnine`),
+  getNekretnine: (opts = {}) => apiClient.get(`${API_ROOT}/nekretnine`, opts),
   getNekretnina: (id) => apiClient.get(`${API_ROOT}/nekretnine/${id}`),
   createNekretnina: (data) => apiClient.post(`${API_ROOT}/nekretnine`, data),
   updateNekretnina: (id, data) =>
     apiClient.put(`${API_ROOT}/nekretnine/${id}`, data),
   deleteNekretnina: (id) => apiClient.delete(`${API_ROOT}/nekretnine/${id}`),
 
-  getZakupnici: (params = {}) =>
-    apiClient.get(`${API_ROOT}/zakupnici`, { params }),
+  getZakupnici: (opts = {}) => {
+    const { signal, ...params } = opts;
+    return apiClient.get(`${API_ROOT}/zakupnici`, { params, signal });
+  },
   createZakupnik: (data) => apiClient.post(`${API_ROOT}/zakupnici`, data),
   updateZakupnik: (id, data) =>
     apiClient.put(`${API_ROOT}/zakupnici/${id}`, data),
@@ -245,14 +247,18 @@ export const api = {
   getZakupnikOverview: (id) =>
     apiClient.get(`${API_ROOT}/zakupnici/${id}/overview`),
 
-  getUgovori: (params = {}) => apiClient.get(`${API_ROOT}/ugovori`, { params }),
+  getUgovori: (opts = {}) => {
+    const { signal, ...params } = opts;
+    return apiClient.get(`${API_ROOT}/ugovori`, { params, signal });
+  },
+  getUgovor: (id) => apiClient.get(`${API_ROOT}/ugovori/${id}`),
   createUgovor: (data) => apiClient.post(`${API_ROOT}/ugovori`, data),
   updateUgovor: (id, data) => apiClient.put(`${API_ROOT}/ugovori/${id}`, data),
   updateStatusUgovora: (id, status) =>
     apiClient.put(`${API_ROOT}/ugovori/${id}/status`, { novi_status: status }),
   deleteUgovor: (id) => apiClient.delete(`${API_ROOT}/ugovori/${id}`),
 
-  getDokumenti: () => apiClient.get(`${API_ROOT}/dokumenti`),
+  getDokumenti: (opts = {}) => apiClient.get(`${API_ROOT}/dokumenti`, opts),
   getDokumentiNekretnine: (id) =>
     apiClient.get(`${API_ROOT}/dokumenti/nekretnina/${id}`),
   getDokumentiZakupnika: (id) =>
@@ -303,7 +309,10 @@ export const api = {
     apiClient.put(`${API_ROOT}/dokumenti/${id}`, data),
   deleteDokument: (id) => apiClient.delete(`${API_ROOT}/dokumenti/${id}`),
 
-  getUnits: (params = {}) => apiClient.get(`${API_ROOT}/units`, { params }),
+  getUnits: (opts = {}) => {
+    const { signal, ...params } = opts;
+    return apiClient.get(`${API_ROOT}/units`, { params, signal });
+  },
   getUnitsForProperty: (propertyId) =>
     apiClient.get(`${API_ROOT}/nekretnine/${propertyId}/units`),
   getUnit: (unitId) => apiClient.get(`${API_ROOT}/units/${unitId}`),
@@ -323,8 +332,10 @@ export const api = {
     return apiClient.post(`${API_ROOT}/ai/parse-pdf-contract`, formData);
   },
 
-  getMaintenanceTasks: (params = {}) =>
-    apiClient.get(`${API_ROOT}/maintenance`, { params }),
+  getMaintenanceTasks: (opts = {}) => {
+    const { signal, ...params } = opts;
+    return apiClient.get(`${API_ROOT}/maintenance`, { params, signal });
+  },
   getMaintenanceTask: (id) => apiClient.get(`${API_ROOT}/maintenance/${id}`),
   createMaintenanceTask: (payload) =>
     apiClient.post(`${API_ROOT}/maintenance`, payload),
@@ -363,7 +374,10 @@ export const api = {
     apiClient.delete(`${API_ROOT}/handover-protocols/${id}`),
 
   // Računi (Bills)
-  getRacuni: (params = {}) => apiClient.get(`${API_ROOT}/racuni`, { params }),
+  getRacuni: (opts = {}) => {
+    const { signal, ...params } = opts;
+    return apiClient.get(`${API_ROOT}/racuni`, { params, signal });
+  },
   getRacun: (id) => apiClient.get(`${API_ROOT}/racuni/${id}`),
   createRacun: (data) => {
     const formData = new FormData();

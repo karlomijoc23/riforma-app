@@ -416,6 +416,20 @@ async def create_contract(
             detail=f"Već postoji aktivan ugovor s oznakom '{item_data['interna_oznaka']}' za ovu nekretninu.",
         )
 
+    # Validate unit belongs to the specified property
+    if unit_id:
+        unit = await property_units.get_by_id(unit_id)
+        if not unit:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Jedinica '{unit_id}' ne postoji.",
+            )
+        if unit.nekretnina_id != item_data.get("nekretnina_id"):
+            raise HTTPException(
+                status_code=400,
+                detail="Odabrana jedinica ne pripada navedenoj nekretnini.",
+            )
+
     # Advisory lock prevents race condition on overlap check
     async with advisory_lock_for_unit(unit_id):
         # 1. Check Overlap

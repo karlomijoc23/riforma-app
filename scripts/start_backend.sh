@@ -6,7 +6,12 @@ BACKEND_DIR="$ROOT_DIR/backend"
 PID_FILE="$ROOT_DIR/backend.pid"
 LOG_FILE="$ROOT_DIR/uvicorn.log"
 VENV_DIR="$BACKEND_DIR/.venv"
-UVICORN_CMD="uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+UVICORN_RELOAD="${UVICORN_RELOAD:-true}"
+RELOAD_FLAG=""
+if [ "$UVICORN_RELOAD" = "true" ]; then
+  RELOAD_FLAG="--reload"
+fi
+UVICORN_CMD="uvicorn app.main:app $RELOAD_FLAG --host 0.0.0.0 --port 8000"
 
 if pgrep -f "$UVICORN_CMD" > /dev/null; then
   echo "Backend already running"
