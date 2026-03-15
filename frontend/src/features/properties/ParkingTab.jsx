@@ -55,7 +55,7 @@ const ParkingTab = ({ nekretninaId, zakupnici }) => {
   const [formData, setFormData] = useState({
     floor: "",
     internal_id: "",
-    tenant_id: "none",
+    zakupnik_id: "none",
     vehicle_plates: ["", ""], // Max 2 plates
     notes: "",
   });
@@ -85,7 +85,7 @@ const ParkingTab = ({ nekretninaId, zakupnici }) => {
       setFormData({
         floor: space.floor,
         internal_id: space.internal_id,
-        tenant_id: space.tenant_id || "none",
+        zakupnik_id: space.zakupnik_id || "none",
         vehicle_plates: [
           space.vehicle_plates?.[0] || "",
           space.vehicle_plates?.[1] || "",
@@ -97,7 +97,7 @@ const ParkingTab = ({ nekretninaId, zakupnici }) => {
       setFormData({
         floor: "",
         internal_id: "",
-        tenant_id: "none",
+        zakupnik_id: "none",
         vehicle_plates: ["", ""],
         notes: "",
       });
@@ -123,7 +123,7 @@ const ParkingTab = ({ nekretninaId, zakupnici }) => {
         nekretnina_id: nekretninaId,
         floor: formData.floor,
         internal_id: formData.internal_id,
-        tenant_id: formData.tenant_id === "none" ? null : formData.tenant_id,
+        zakupnik_id: formData.zakupnik_id === "none" ? null : formData.zakupnik_id,
         vehicle_plates: formData.vehicle_plates.filter((p) => p.trim() !== ""),
         notes: formData.notes,
       };
@@ -222,7 +222,7 @@ const ParkingTab = ({ nekretninaId, zakupnici }) => {
                     {space.internal_id}
                   </TableCell>
                   <TableCell>{space.floor}</TableCell>
-                  <TableCell>{getTenantName(space.tenant_id)}</TableCell>
+                  <TableCell>{getTenantName(space.zakupnik_id)}</TableCell>
                   <TableCell>
                     <div className="flex gap-1 flex-wrap">
                       {space.vehicle_plates?.length > 0 ? (
@@ -302,9 +302,9 @@ const ParkingTab = ({ nekretninaId, zakupnici }) => {
             <div className="space-y-2">
               <Label>Zakupnik</Label>
               <Select
-                value={formData.tenant_id}
+                value={formData.zakupnik_id}
                 onValueChange={(val) =>
-                  setFormData({ ...formData, tenant_id: val })
+                  setFormData({ ...formData, zakupnik_id: val })
                 }
               >
                 <SelectTrigger>

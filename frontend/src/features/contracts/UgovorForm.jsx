@@ -303,8 +303,12 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
           toast.success("Dokument ugovora spremljen.");
         } catch (docError) {
           console.error("Error saving document:", docError);
+          const detail =
+            docError.response?.data?.detail ||
+            docError.message ||
+            "Nepoznata greška";
           toast.error(
-            "Ugovor je spremljen, ali spremanje dokumenta nije uspjelo.",
+            `Ugovor je spremljen, ali spremanje dokumenta nije uspjelo: ${detail}`,
           );
         }
       }

@@ -11,7 +11,7 @@ router = APIRouter()
 
 class ParkingSpaceCreate(BaseModel):
     nekretnina_id: str
-    tenant_id: Optional[str] = None
+    zakupnik_id: Optional[str] = None
     floor: str
     internal_id: str
     vehicle_plates: List[str] = []
@@ -20,7 +20,7 @@ class ParkingSpaceCreate(BaseModel):
 
 class ParkingSpaceUpdate(BaseModel):
     nekretnina_id: Optional[str] = None
-    tenant_id: Optional[str] = None
+    zakupnik_id: Optional[str] = None
     floor: Optional[str] = None
     internal_id: Optional[str] = None
     vehicle_plates: Optional[List[str]] = None
