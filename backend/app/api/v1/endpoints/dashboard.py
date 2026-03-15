@@ -48,7 +48,7 @@ async def get_dashboard_stats(
             portfolio_value,
             expiring_soon,
             active_unit_id_set,
-            all_properties_rows,
+            property_name_map,
         ) = await asyncio.gather(
             nekretnine.count(),
             zakupnici.count(),
@@ -57,9 +57,8 @@ async def get_dashboard_stats(
             nekretnine.portfolio_value(),
             ugovori.expiring_soon(days=90),
             ugovori.active_unit_ids(),
-            nekretnine.find_all(),
+            nekretnine.id_naziv_map(),
         )
-        property_map = {p.id: p for p in all_properties_rows}
 
         # -- Contract status breakdown (from SQL) --------------------------
         status_breakdown: Dict[str, int] = defaultdict(int, status_breakdown_raw)
@@ -72,8 +71,7 @@ async def get_dashboard_stats(
         # -- Revenue by property -------------------------------------------
         revenue_by_property = []
         for prop_id, prihod in revenue_by_prop.items():
-            prop = property_map.get(prop_id)
-            naziv = prop.naziv if prop else "Nepoznato"
+            naziv = property_name_map.get(prop_id, "Nepoznato")
             revenue_by_property.append({"id": prop_id, "naziv": naziv, "prihod": prihod})
         revenue_by_property.sort(key=lambda x: x["prihod"], reverse=True)
 
@@ -94,8 +92,7 @@ async def get_dashboard_stats(
         # Enrich by_property with property names
         by_property = []
         for item in by_property_raw:
-            prop = property_map.get(item["id"])
-            item["naziv"] = prop.naziv if prop else "Nepoznato"
+            item["naziv"] = property_name_map.get(item["id"], "Nepoznato")
             by_property.append(item)
 
         najamni_kapacitet = {

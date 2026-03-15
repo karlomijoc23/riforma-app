@@ -640,10 +640,10 @@ class DokumentiRow(Base):
         String(36), ForeignKey("ugovori.id", ondelete="SET NULL"), nullable=True, index=True
     )
     property_unit_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("property_units.id", ondelete="SET NULL"), nullable=True
+        String(36), ForeignKey("property_units.id", ondelete="SET NULL"), nullable=True, index=True
     )
     maintenance_task_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("maintenance_tasks.id", ondelete="SET NULL"), nullable=True
+        String(36), ForeignKey("maintenance_tasks.id", ondelete="SET NULL"), nullable=True, index=True
     )
     datum_isteka: Mapped[Optional[str]] = mapped_column(
         String(20), nullable=True

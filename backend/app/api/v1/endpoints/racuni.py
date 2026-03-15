@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -415,55 +416,11 @@ async def get_racuni_analytics(
     period_do: Optional[str] = None,
     current_user: Dict[str, Any] = Depends(deps.get_current_user),
 ):
-    filters: Dict[str, Any] = {}
-    if nekretnina_id:
-        filters["nekretnina_id"] = nekretnina_id
-
-    extra_conditions = []
-    if period_od:
-        extra_conditions.append(RacuniRow.datum_racuna >= date.fromisoformat(period_od))
-    if period_do:
-        extra_conditions.append(RacuniRow.datum_racuna <= date.fromisoformat(period_do))
-
-    items = await racuni.find_all(
-        filters=filters,
-        extra_conditions=extra_conditions if extra_conditions else [],
+    return await racuni.analytics_summary(
+        nekretnina_id=nekretnina_id,
+        period_od=date.fromisoformat(period_od) if period_od else None,
+        period_do=date.fromisoformat(period_do) if period_do else None,
     )
-
-    # Aggregate by utility type
-    po_tipu: Dict[str, float] = {}
-    po_nekretnini: Dict[str, float] = {}
-    po_statusu: Dict[str, int] = {}
-    ukupno = 0.0
-    neplaceno = 0.0
-    za_preknjizavanje = 0
-
-    for item in items:
-        iznos = float(item.iznos or 0)
-        tip = item.tip_utroska or "ostalo"
-        nek_id = item.nekretnina_id or "nepoznato"
-        st = item.status_placanja or "ceka_placanje"
-        prk = item.preknjizavanje_status or "nije_primjenjivo"
-
-        ukupno += iznos
-        po_tipu[tip] = po_tipu.get(tip, 0) + iznos
-        po_nekretnini[nek_id] = po_nekretnini.get(nek_id, 0) + iznos
-        po_statusu[st] = po_statusu.get(st, 0) + 1
-
-        if st in ("ceka_placanje", "djelomicno_placeno", "prekoraceno"):
-            neplaceno += iznos
-        if prk == "ceka":
-            za_preknjizavanje += 1
-
-    return {
-        "ukupno_iznos": round(ukupno, 2),
-        "neplaceno_iznos": round(neplaceno, 2),
-        "za_preknjizavanje": za_preknjizavanje,
-        "ukupno_racuna": len(items),
-        "po_tipu": po_tipu,
-        "po_nekretnini": po_nekretnini,
-        "po_statusu": po_statusu,
-    }
 
 
 @router.get(
@@ -475,20 +432,17 @@ async def get_tenant_ledger(
     current_user: Dict[str, Any] = Depends(deps.get_current_user),
 ):
     """Get financial ledger for a specific tenant."""
-    items = await racuni.find_all(
-        filters={"zakupnik_id": zakupnik_id},
-        order_by="datum_racuna",
+    items, (total_billed, total_paid) = await asyncio.gather(
+        racuni.find_all(
+            filters={"zakupnik_id": zakupnik_id},
+            order_by="datum_racuna",
+        ),
+        racuni.ledger_totals(zakupnik_id),
     )
-
-    total_billed = 0
-    total_paid = 0
-    for item in items:
-        total_billed += float(item.iznos or 0)
-        total_paid += float(item.total_paid or 0)
 
     return {
         "zakupnik_id": zakupnik_id,
-        "racuni": [racuni.to_dict(item) for item in items],
+        "racuni": [_normalize_file_path(racuni.to_dict(item)) for item in items],
         "ukupno_zaduzenje": round(total_billed, 2),
         "ukupno_placeno": round(total_paid, 2),
         "saldo": round(total_billed - total_paid, 2),
@@ -509,30 +463,14 @@ async def get_tax_summary(
     """Tax summary for a given year."""
     target_year = year or datetime.now().year
 
-    all_racuni = await racuni.find_all()
-    all_ugovori = await ugovori.find_all()
+    # Parallel: contract income + bill expenses via SQL
+    income_result, expense_result = await asyncio.gather(
+        ugovori.tax_income_for_year(target_year),
+        racuni.expense_by_year(target_year),
+    )
 
-    # Income from contracts active in target year
-    total_income = 0
-    for u in all_ugovori:
-        start = u.datum_pocetka
-        end = u.datum_zavrsetka
-        if start and start.year <= target_year and (not end or end.year >= target_year):
-            monthly = float(u.osnovna_zakupnina or 0) + float(
-                u.cam_troskovi or 0
-            )
-            total_income += monthly * 12
-
-    # Expenses from bills in target year
-    total_expenses = 0
-    expense_by_type = {}
-    for r in all_racuni:
-        if r.datum_racuna and r.datum_racuna.year == target_year:
-            iznos = float(r.iznos or 0)
-            total_expenses += iznos
-            tip = r.tip_utroska or "ostalo"
-            expense_by_type[tip] = expense_by_type.get(tip, 0) + iznos
-
+    total_income = income_result
+    total_expenses, expense_by_type = expense_result
     net = total_income - total_expenses
 
     return {
@@ -610,7 +548,7 @@ async def update_racun(
     else:
         updated = item
 
-    return racuni.to_dict(updated)
+    return _normalize_file_path(racuni.to_dict(updated))
 
 
 @router.patch(
@@ -645,7 +583,7 @@ async def update_preknjizavanje(
         update_dict["preknjizavanje_napomena"] = data.preknjizavanje_napomena
 
     updated = await racuni.update_by_id(id, update_dict)
-    return racuni.to_dict(updated)
+    return _normalize_file_path(racuni.to_dict(updated))
 
 
 @router.delete(
@@ -738,7 +676,7 @@ async def record_payment(
         "updated_at": datetime.now(timezone.utc),
     })
 
-    return racuni.to_dict(updated)
+    return _normalize_file_path(racuni.to_dict(updated))
 
 
 # --------------- Approval Workflow ---------------
@@ -801,7 +739,7 @@ async def submit_for_approval(
         if email:
             await send_email(email, "Riforma: Racun ceka odobrenje", html)
 
-    return racuni.to_dict(updated_bill)
+    return _normalize_file_path(racuni.to_dict(updated_bill))
 
 
 @router.post(
@@ -851,7 +789,7 @@ async def approve_racun(
             html = _build_bill_approved_email(updated_bill_dict, current_user)
             await send_email(creator.email, "Riforma: Racun odobren", html)
 
-    return racuni.to_dict(updated_bill)
+    return _normalize_file_path(racuni.to_dict(updated_bill))
 
 
 @router.post(
@@ -906,7 +844,7 @@ async def reject_racun(
             )
             await send_email(creator.email, "Riforma: Racun odbijen", html)
 
-    return racuni.to_dict(updated_bill)
+    return _normalize_file_path(racuni.to_dict(updated_bill))
 
 
 @router.post(
@@ -949,7 +887,7 @@ async def withdraw_racun(
         "updated_at": now,
     }
     updated = await racuni.update_by_id(id, update_fields)
-    return racuni.to_dict(updated)
+    return _normalize_file_path(racuni.to_dict(updated))
 
 
 # --------------- AI Parse ---------------

@@ -338,7 +338,12 @@ async def get_expiring_documents(
         order_by="datum_isteka",
         order_dir="asc",
     )
-    return [dokumenti.to_dict(item) for item in items]
+    result = []
+    for item in items:
+        d = dokumenti.to_dict(item)
+        _normalize_file_path(d)
+        result.append(d)
+    return result
 
 
 @router.get("/{id}", dependencies=[Depends(deps.require_scopes("documents:read"))])
@@ -413,9 +418,13 @@ async def update_document(
 
     if update_dict:
         updated = await dokumenti.update_by_id(id, update_dict)
-        return dokumenti.to_dict(updated)
+        d = dokumenti.to_dict(updated)
+        _normalize_file_path(d)
+        return d
 
-    return dokumenti.to_dict(item)
+    d = dokumenti.to_dict(item)
+    _normalize_file_path(d)
+    return d
 
 
 @router.delete(

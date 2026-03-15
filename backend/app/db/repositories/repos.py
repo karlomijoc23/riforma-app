@@ -1,9 +1,10 @@
 """Concrete repository classes for each domain entity."""
 
+import asyncio
 from datetime import date, timedelta
 from typing import Any, Dict, List, Tuple
 
-from sqlalchemy import and_, case, func, literal_column, or_, select
+from sqlalchemy import and_, case, func, select
 
 from app.db.repositories.base import BaseRepository
 from app.models.tables import (
@@ -79,6 +80,14 @@ class NekretnineRepository(BaseRepository[NekretnineRow]):
             stmt = self._apply_tenant_filter(stmt)
             result = await session.execute(stmt)
             return float(result.scalar() or 0)
+
+    async def id_naziv_map(self) -> Dict[str, str]:
+        """Return {id: naziv} dict — lightweight alternative to find_all()."""
+        async with self._session_factory() as session:
+            stmt = select(NekretnineRow.id, NekretnineRow.naziv)
+            stmt = self._apply_tenant_filter(stmt)
+            result = await session.execute(stmt)
+            return {row[0]: row[1] for row in result.all()}
 
 
 class PropertyUnitRepository(BaseRepository[PropertyUnitRow]):
@@ -172,6 +181,33 @@ class UgovoriRepository(BaseRepository[UgovoriRow]):
             total = sum(float(r[1]) for r in rows)
             by_property = {r[0]: float(r[1]) for r in rows if r[0]}
             return total, by_property
+
+    async def tax_income_for_year(self, year: int) -> float:
+        """Return annualised contract income for contracts active in *year*."""
+        year_start = date(year, 1, 1)
+        year_end = date(year, 12, 31)
+        async with self._session_factory() as session:
+            stmt = select(
+                func.coalesce(
+                    func.sum(
+                        (
+                            func.coalesce(UgovoriRow.osnovna_zakupnina, 0)
+                            + func.coalesce(UgovoriRow.cam_troskovi, 0)
+                        )
+                        * 12
+                    ),
+                    0,
+                )
+            ).where(
+                UgovoriRow.datum_pocetka <= year_end,
+                or_(
+                    UgovoriRow.datum_zavrsetka.is_(None),
+                    UgovoriRow.datum_zavrsetka >= year_start,
+                ),
+            )
+            stmt = self._apply_tenant_filter(stmt)
+            result = await session.execute(stmt)
+            return float(result.scalar() or 0)
 
     async def expiring_soon(self, days: int = 90) -> List[Dict[str, Any]]:
         """Return contracts expiring within *days* via SQL WHERE."""
@@ -280,6 +316,150 @@ class TenantSettingsRepository(BaseRepository[TenantSettingsRow]):
 class RacuniRepository(BaseRepository[RacuniRow]):
     model = RacuniRow
     tenant_scoped = True
+
+    async def analytics_summary(
+        self,
+        nekretnina_id: str | None = None,
+        period_od: date | None = None,
+        period_do: date | None = None,
+    ) -> Dict[str, Any]:
+        """Return aggregated analytics via SQL GROUP BY."""
+        async with self._session_factory() as session:
+            conditions = []
+            if nekretnina_id:
+                conditions.append(RacuniRow.nekretnina_id == nekretnina_id)
+            if period_od:
+                conditions.append(RacuniRow.datum_racuna >= period_od)
+            if period_do:
+                conditions.append(RacuniRow.datum_racuna <= period_do)
+
+            base = select(RacuniRow)
+            if conditions:
+                base = base.where(and_(*conditions))
+            base = self._apply_tenant_filter(base)
+
+            # po_tipu: SUM(iznos) GROUP BY tip_utroska
+            stmt_tip = (
+                select(
+                    RacuniRow.tip_utroska,
+                    func.coalesce(func.sum(RacuniRow.iznos), 0),
+                )
+                .group_by(RacuniRow.tip_utroska)
+            )
+            if conditions:
+                stmt_tip = stmt_tip.where(and_(*conditions))
+            stmt_tip = self._apply_tenant_filter(stmt_tip)
+
+            # po_nekretnini: SUM(iznos) GROUP BY nekretnina_id
+            stmt_nek = (
+                select(
+                    RacuniRow.nekretnina_id,
+                    func.coalesce(func.sum(RacuniRow.iznos), 0),
+                )
+                .group_by(RacuniRow.nekretnina_id)
+            )
+            if conditions:
+                stmt_nek = stmt_nek.where(and_(*conditions))
+            stmt_nek = self._apply_tenant_filter(stmt_nek)
+
+            # po_statusu: COUNT(*) GROUP BY status_placanja
+            stmt_st = (
+                select(
+                    RacuniRow.status_placanja,
+                    func.count(),
+                )
+                .group_by(RacuniRow.status_placanja)
+            )
+            if conditions:
+                stmt_st = stmt_st.where(and_(*conditions))
+            stmt_st = self._apply_tenant_filter(stmt_st)
+
+            # totals
+            stmt_totals = select(
+                func.count().label("cnt"),
+                func.coalesce(func.sum(RacuniRow.iznos), 0).label("ukupno"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                RacuniRow.status_placanja.in_(
+                                    ["ceka_placanje", "djelomicno_placeno", "prekoraceno"]
+                                ),
+                                RacuniRow.iznos,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("neplaceno"),
+                func.sum(
+                    case(
+                        (RacuniRow.preknjizavanje_status == "ceka", 1),
+                        else_=0,
+                    )
+                ).label("za_preknjizavanje"),
+            )
+            if conditions:
+                stmt_totals = stmt_totals.where(and_(*conditions))
+            stmt_totals = self._apply_tenant_filter(
+                stmt_totals.select_from(RacuniRow)
+            )
+
+            r_tip, r_nek, r_st, r_tot = await asyncio.gather(
+                session.execute(stmt_tip),
+                session.execute(stmt_nek),
+                session.execute(stmt_st),
+                session.execute(stmt_totals),
+            )
+
+            po_tipu = {row[0] or "ostalo": float(row[1]) for row in r_tip.all()}
+            po_nekretnini = {
+                row[0] or "nepoznato": float(row[1]) for row in r_nek.all()
+            }
+            po_statusu = {
+                row[0] or "ceka_placanje": row[1] for row in r_st.all()
+            }
+            totals = r_tot.one()
+
+            return {
+                "ukupno_iznos": round(float(totals.ukupno), 2),
+                "neplaceno_iznos": round(float(totals.neplaceno), 2),
+                "za_preknjizavanje": int(totals.za_preknjizavanje or 0),
+                "ukupno_racuna": int(totals.cnt),
+                "po_tipu": po_tipu,
+                "po_nekretnini": po_nekretnini,
+                "po_statusu": po_statusu,
+            }
+
+    async def ledger_totals(self, zakupnik_id: str) -> Tuple[float, float]:
+        """Return (total_billed, total_paid) for a zakupnik via SQL."""
+        async with self._session_factory() as session:
+            stmt = select(
+                func.coalesce(func.sum(RacuniRow.iznos), 0),
+                func.coalesce(func.sum(RacuniRow.total_paid), 0),
+            ).where(RacuniRow.zakupnik_id == zakupnik_id)
+            stmt = self._apply_tenant_filter(stmt)
+            result = await session.execute(stmt)
+            row = result.one()
+            return float(row[0]), float(row[1])
+
+    async def expense_by_year(self, year: int) -> Tuple[float, Dict[str, float]]:
+        """Return (total_expenses, {tip: amount}) for a year via SQL."""
+        async with self._session_factory() as session:
+            stmt = (
+                select(
+                    RacuniRow.tip_utroska,
+                    func.coalesce(func.sum(RacuniRow.iznos), 0),
+                )
+                .where(func.year(RacuniRow.datum_racuna) == year)
+                .group_by(RacuniRow.tip_utroska)
+            )
+            stmt = self._apply_tenant_filter(stmt)
+            result = await session.execute(stmt)
+            rows = result.all()
+            by_type = {row[0] or "ostalo": float(row[1]) for row in rows}
+            total = sum(by_type.values())
+            return total, by_type
 
 
 class OglasiRepository(BaseRepository[OglasiRow]):
