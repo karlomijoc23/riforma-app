@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import date, timedelta
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, case, func, select
 
@@ -319,9 +319,9 @@ class RacuniRepository(BaseRepository[RacuniRow]):
 
     async def analytics_summary(
         self,
-        nekretnina_id: str | None = None,
-        period_od: date | None = None,
-        period_do: date | None = None,
+        nekretnina_id: Optional[str] = None,
+        period_od: Optional[date] = None,
+        period_do: Optional[date] = None,
     ) -> Dict[str, Any]:
         """Return aggregated analytics via SQL GROUP BY."""
         async with self._session_factory() as session:
