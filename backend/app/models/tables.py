@@ -712,6 +712,13 @@ class UgovoriRow(Base):
     last_expiry_notified_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Stamp posljednje notifikacije o nadolazećoj godišnjoj indeksaciji.
+    # Cooldown je 60 dana — prozor obavještavanja je 30 dana prije
+    # godišnjice, pa 60-dnevni cooldown garantira jednu obavijest po
+    # godišnjici i izbjegava istog mjeseca duplikate.
+    last_indexation_notified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

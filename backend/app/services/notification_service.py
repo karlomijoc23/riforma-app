@@ -323,10 +323,133 @@ async def notify_maintenance_overdue():
         await send_email(email, subj_m, html)
 
 
+INDEXATION_LOOKAHEAD_DAYS = 30
+INDEXATION_COOLDOWN_DAYS = 60
+
+
+async def notify_upcoming_indexations():
+    """Email admins about contracts whose annual indexation anniversary
+    falls within the next ``INDEXATION_LOOKAHEAD_DAYS`` days.
+
+    Uses ``indexation_service.next_indexation_date`` so the day-of-month
+    clamping and contract-end checks stay in one place.
+    Cooldown: a contract that has been notified inside the last 60 days
+    is skipped — the 30-day window means each anniversary gets exactly
+    one heads-up email.
+    """
+    from app.services.indexation_service import (  # avoid circular import
+        next_indexation_date,
+    )
+
+    today = local_today()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=INDEXATION_COOLDOWN_DAYS)
+    window_end = today + timedelta(days=INDEXATION_LOOKAHEAD_DAYS)
+
+    candidates = await ugovori.find_all(extra_conditions=[
+        UgovoriRow.status.in_(["aktivno", "na_isteku"]),
+        UgovoriRow.indeksacija.is_(True),
+        UgovoriRow.indeksacija_dan.is_not(None),
+        UgovoriRow.indeksacija_mjesec.is_not(None),
+        or_(
+            UgovoriRow.last_indexation_notified_at.is_(None),
+            UgovoriRow.last_indexation_notified_at < cutoff,
+        ),
+    ])
+
+    # Filter u Pythonu jer izračun sljedeće godišnjice s clamp-anjem dana
+    # (31. veljače → kraj veljače) je teško izraziti čistim SQL-om.
+    upcoming = []
+    for c in candidates:
+        next_date = next_indexation_date(today, c)
+        if next_date is None:
+            continue
+        if today <= next_date <= window_end:
+            upcoming.append((c, next_date))
+
+    if not upcoming:
+        logger.info("No upcoming indexations in the next %s days.", INDEXATION_LOOKAHEAD_DAYS)
+        return
+
+    admins = await _recipients_for_current_tenant(["owner", "admin", "accountant"])
+
+    _td = "padding:8px;border-bottom:1px solid #e2e8f0"
+    _hdr = "background:#0f5e4d;color:white;padding:20px;border-radius:8px 8px 0 0"
+    _body = (
+        "padding:20px;background:#f8fafc;"
+        "border:1px solid #e2e8f0;border-radius:0 0 8px 8px"
+    )
+    _wrap = "font-family:sans-serif;max-width:600px;margin:0 auto"
+
+    for admin in admins:
+        email = admin.email
+        if not email:
+            continue
+
+        rows_html = ""
+        for c, next_date in upcoming:
+            days_until = (next_date - today).days
+            oznaka = escape(str(c.interna_oznaka or "N/A"))
+            datum = escape(next_date.strftime("%d.%m.%Y."))
+            zakup = c.osnovna_zakupnina or 0
+            indeks = escape(str(c.indeks or "—"))
+            rows_html += (
+                f'<tr><td style="{_td}">{oznaka}</td>'
+                f'<td style="{_td}">{datum}</td>'
+                f'<td style="{_td}">{days_until} dana</td>'
+                f'<td style="{_td}">{indeks}</td>'
+                f'<td style="{_td}">{zakup:.2f} €</td></tr>'
+            )
+
+        html = f"""
+        <div style="{_wrap}">
+            <div style="{_hdr}">
+                <h2 style="margin:0;">Nadolazece indeksacije</h2>
+                <p style="margin:4px 0 0;opacity:0.8;">
+                    Riforma - Podsjetnik</p>
+            </div>
+            <div style="{_body}">
+                <p>{len(upcoming)} ugovor(a) ima godisnju indeksaciju
+                u narednih {INDEXATION_LOOKAHEAD_DAYS} dana:</p>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="background:#e2e8f0;">
+                            <th style="padding:8px;text-align:left;">Oznaka</th>
+                            <th style="padding:8px;text-align:left;">Datum</th>
+                            <th style="padding:8px;text-align:left;">Za</th>
+                            <th style="padding:8px;text-align:left;">Indeks</th>
+                            <th style="padding:8px;text-align:left;">Trenutna</th>
+                        </tr>
+                    </thead>
+                    <tbody>{rows_html}</tbody>
+                </table>
+                <p style="margin-top:16px;color:#64748b;font-size:13px;">
+                    Pripremite anex prema indeksu prije navedenog datuma.
+                </p>
+            </div>
+        </div>"""
+
+        await send_email(
+            email,
+            f"Riforma: {len(upcoming)} indeksacija u sljedecih {INDEXATION_LOOKAHEAD_DAYS} dana",
+            html,
+        )
+
+    # Stamp svaki ugovor koji je bio u batch-u kako bi cooldown krenuo.
+    now = datetime.now(timezone.utc)
+    for c, _next_date in upcoming:
+        try:
+            await ugovori.update_by_id(c.id, {"last_indexation_notified_at": now})
+        except Exception:
+            logger.exception(
+                "Failed to stamp last_indexation_notified_at on contract %s", c.id
+            )
+
+
 async def run_all_notifications():
     """Run all notification checks. Called by scheduler."""
     logger.info("Running notification checks...")
     await notify_expiring_contracts()
+    await notify_upcoming_indexations()
     await notify_overdue_bills()
     await notify_maintenance_overdue()
     logger.info("Notification checks completed.")
