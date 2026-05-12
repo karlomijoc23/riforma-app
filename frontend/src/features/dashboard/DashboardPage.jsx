@@ -700,10 +700,14 @@ export const Dashboard = () => {
           </CardHeader>
           <CardContent>
             {revenueChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={280}>
+              <ResponsiveContainer
+                width="100%"
+                height={Math.max(220, revenueChartData.length * 44)}
+              >
                 <BarChart
                   data={revenueChartData}
-                  margin={{ top: 5, right: 10, left: 10, bottom: 50 }}
+                  layout="vertical"
+                  margin={{ top: 5, right: 60, left: 8, bottom: 5 }}
                   onClick={(data) => {
                     if (data?.activePayload?.[0]?.payload?.id) {
                       navigate(
@@ -713,27 +717,31 @@ export const Dashboard = () => {
                   }}
                   className="cursor-pointer"
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis
-                    dataKey="naziv"
-                    tick={{ fontSize: 11 }}
-                    angle={-35}
-                    textAnchor="end"
-                    interval={0}
-                    height={60}
+                  <CartesianGrid
+                    horizontal={false}
+                    strokeDasharray="3 3"
+                    stroke="#f0f0f0"
                   />
-                  <YAxis
+                  <XAxis
+                    type="number"
                     tick={{ fontSize: 11 }}
                     tickFormatter={(v) =>
                       v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v
                     }
                   />
-                  <Tooltip content={<RevenueTooltip />} />
+                  <YAxis
+                    dataKey="naziv"
+                    type="category"
+                    tick={{ fontSize: 11 }}
+                    width={140}
+                    interval={0}
+                  />
+                  <Tooltip content={<RevenueTooltip />} cursor={{ fill: "#f8fafc" }} />
                   <Bar
                     dataKey="prihod"
                     fill="#3b82f6"
-                    radius={[4, 4, 0, 0]}
-                    maxBarSize={50}
+                    radius={[0, 4, 4, 0]}
+                    maxBarSize={24}
                   />
                 </BarChart>
               </ResponsiveContainer>

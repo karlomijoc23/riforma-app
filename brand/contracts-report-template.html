@@ -69,20 +69,85 @@
       .two-col { display: flex; gap: 6mm; margin-top: 8mm; }
       .two-col > * { flex: 1; }
 
-      .by-row {
+      /* Rang-lista (prihod po nekretnini, top zakupnici): kartice s
+         brojem, nazivom u truncate-okviru, iznosom desno i mini
+         progress barom koji pokazuje relativni udio. */
+      .rank-list {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        padding: 3mm 4mm;
+      }
+      .rank-list__row {
+        display: flex;
+        align-items: center;
+        gap: 3mm;
+        padding: 2.5mm 0;
+        border-bottom: 1px solid var(--color-border);
+      }
+      .rank-list__row:last-child { border-bottom: 0; }
+
+      .rank-list__num {
+        flex-shrink: 0;
+        width: 6mm;
+        height: 6mm;
+        border-radius: 50%;
+        background: var(--color-subtle);
+        color: var(--color-primary);
+        font-weight: 700;
+        font-size: 8.5pt;
+        text-align: center;
+        line-height: 6mm;
+      }
+      .rank-list__body {
+        flex: 1;
+        min-width: 0;
+      }
+      .rank-list__name {
+        font-size: 9.5pt;
+        font-weight: 600;
+        color: var(--color-ink);
+        /* Tekst se prelomi unutar okvira umjesto da gura iznos */
+        overflow-wrap: break-word;
+        word-break: break-word;
+        line-height: 1.3;
+      }
+      .rank-list__hint {
+        font-size: 7.5pt;
+        color: var(--color-muted);
+        margin-top: 0.5mm;
+      }
+      .rank-list__bar {
+        margin-top: 1.5mm;
+        height: 1.5mm;
+        background: var(--color-subtle);
+        border-radius: 0.8mm;
+        overflow: hidden;
+      }
+      .rank-list__bar > span {
+        display: block;
+        height: 100%;
+        background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+      }
+      .rank-list__value {
+        flex-shrink: 0;
+        text-align: right;
+        font-weight: 700;
+        color: var(--color-primary);
+        font-variant-numeric: tabular-nums;
+        font-size: 10pt;
+        white-space: nowrap;
+      }
+
+      .rank-list__overflow {
+        margin-top: 2.5mm;
+        padding-top: 2.5mm;
+        border-top: 1px dashed var(--color-border);
+        font-size: 7.5pt;
+        font-style: italic;
+        color: var(--color-muted);
         display: flex;
         justify-content: space-between;
-        padding: 2mm 0;
-        border-bottom: 1px dashed var(--color-border);
-        font-size: 9pt;
-      }
-      .by-row:last-child { border-bottom: 0; }
-      .by-row strong { color: var(--color-primary); }
-      .by-row--overflow {
-        font-style: italic;
-        font-size: 8pt;
-        border-bottom: 0;
-        padding-top: 3mm;
       }
 
       .pill { display:inline-block; padding: 0.6mm 2.5mm; border-radius:999px; font-size:7.5pt; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; border:1px solid; }
@@ -275,32 +340,54 @@
       {% if revenue_by_property %}
       <div>
         <h2 class="section-title">Top 5 prihoda po nekretnini</h2>
-        {% for row in revenue_by_property %}
-        <div class="by-row"><span>{{ row.name }}</span><strong>{{ row.amount | currency }}</strong></div>
-        {% endfor %}
-        {% if revenue_overflow and revenue_overflow > 0 %}
-        <div class="by-row by-row--overflow">
-          <span class="text-muted">… i još {{ revenue_overflow }} nekretnina</span>
-          <span class="text-muted">vidi detaljan pregled</span>
+        {% set rev_max = revenue_by_property[0].amount or 1 %}
+        <div class="rank-list">
+          {% for row in revenue_by_property %}
+          <div class="rank-list__row">
+            <div class="rank-list__num">{{ loop.index }}</div>
+            <div class="rank-list__body">
+              <div class="rank-list__name">{{ row.name }}</div>
+              <div class="rank-list__bar">
+                <span style="width: {{ (row.amount / rev_max * 100) | round(0) }}%;"></span>
+              </div>
+            </div>
+            <div class="rank-list__value">{{ row.amount | currency }}</div>
+          </div>
+          {% endfor %}
+          {% if revenue_overflow and revenue_overflow > 0 %}
+          <div class="rank-list__overflow">
+            <span>… i još {{ revenue_overflow }} nekretnina</span>
+            <span>vidi detaljan pregled</span>
+          </div>
+          {% endif %}
         </div>
-        {% endif %}
       </div>
       {% endif %}
       {% if top_tenants %}
       <div>
         <h2 class="section-title">Top 5 zakupnika (mj. prihod)</h2>
-        {% for row in top_tenants %}
-        <div class="by-row">
-          <span>{{ row.name }} <span class="text-muted">· {{ row.count }} ug.</span></span>
-          <strong>{{ row.rent | currency }}</strong>
+        {% set ten_max = top_tenants[0].rent or 1 %}
+        <div class="rank-list">
+          {% for row in top_tenants %}
+          <div class="rank-list__row">
+            <div class="rank-list__num">{{ loop.index }}</div>
+            <div class="rank-list__body">
+              <div class="rank-list__name">{{ row.name }}</div>
+              <div class="rank-list__hint">{{ row.count }} ugovor{% if row.count != 1 %}a{% endif %}</div>
+              <div class="rank-list__bar">
+                <span style="width: {{ (row.rent / ten_max * 100) | round(0) }}%;"></span>
+              </div>
+            </div>
+            <div class="rank-list__value">{{ row.rent | currency }}</div>
+          </div>
+          {% endfor %}
+          {% if tenants_overflow and tenants_overflow > 0 %}
+          <div class="rank-list__overflow">
+            <span>… i još {{ tenants_overflow }} zakupnika</span>
+            <span>vidi detaljan pregled</span>
+          </div>
+          {% endif %}
         </div>
-        {% endfor %}
-        {% if tenants_overflow and tenants_overflow > 0 %}
-        <div class="by-row by-row--overflow">
-          <span class="text-muted">… i još {{ tenants_overflow }} zakupnika</span>
-          <span class="text-muted">vidi detaljan pregled</span>
-        </div>
-        {% endif %}
       </div>
       {% endif %}
     </div>
