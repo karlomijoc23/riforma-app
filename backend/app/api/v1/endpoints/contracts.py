@@ -197,6 +197,8 @@ class ContractCreate(BaseModel):
     indeksacija: bool = False
     indeks: Optional[str] = Field(default=None, max_length=200)
     formula_indeksacije: Optional[str] = Field(default=None, max_length=500)
+    indeksacija_dan: Optional[int] = Field(default=None, ge=1, le=31)
+    indeksacija_mjesec: Optional[int] = Field(default=None, ge=1, le=12)
     obveze_odrzavanja: Optional[str] = Field(default=None, max_length=2000)
     namjena_prostora: Optional[str] = Field(default=None, max_length=500)
     rezije_brojila: Optional[str] = Field(default=None, max_length=500)
@@ -247,6 +249,8 @@ class ContractUpdate(BaseModel):
     indeksacija: Optional[bool] = None
     indeks: Optional[str] = Field(default=None, max_length=200)
     formula_indeksacije: Optional[str] = Field(default=None, max_length=500)
+    indeksacija_dan: Optional[int] = Field(default=None, ge=1, le=31)
+    indeksacija_mjesec: Optional[int] = Field(default=None, ge=1, le=12)
     obveze_odrzavanja: Optional[str] = Field(default=None, max_length=2000)
     namjena_prostora: Optional[str] = Field(default=None, max_length=500)
     rezije_brojila: Optional[str] = Field(default=None, max_length=500)

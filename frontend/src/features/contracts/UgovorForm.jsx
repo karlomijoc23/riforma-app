@@ -78,6 +78,8 @@ const emptyForm = {
   indeksacija: false,
   indeks: "",
   formula_indeksacije: "",
+  indeksacija_dan: "",
+  indeksacija_mjesec: "",
   obveze_odrzavanja: "",
   namjena_prostora: "",
   rezije_brojila: "",
@@ -199,6 +201,13 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
         datum_zavrsetka: ugovor.datum_zavrsetka
           ? ugovor.datum_zavrsetka.split("T")[0]
           : "",
+        // Numeric fields → string za controlled inpute. null/undefined → "".
+        indeksacija_dan:
+          ugovor.indeksacija_dan != null ? String(ugovor.indeksacija_dan) : "",
+        indeksacija_mjesec:
+          ugovor.indeksacija_mjesec != null
+            ? String(ugovor.indeksacija_mjesec)
+            : "",
       });
       if (ugovor.nekretnina_id) {
         fetchUnits(ugovor.nekretnina_id);
@@ -340,6 +349,15 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
         cam_troskovi: parseFloat(formData.cam_troskovi) || 0,
         polog_depozit: parseFloat(formData.polog_depozit) || 0,
         garancija: parseFloat(formData.garancija) || 0,
+        // Indeksacija dan/mjesec — šaljemo broj ili null (backend
+        // odbije < 1 / > 31 / 12 nego null). Ako indeksacija nije
+        // uključena, oba su null bez obzira na ostali state.
+        indeksacija_dan: formData.indeksacija
+          ? parseInt(formData.indeksacija_dan) || null
+          : null,
+        indeksacija_mjesec: formData.indeksacija
+          ? parseInt(formData.indeksacija_mjesec) || null
+          : null,
         // Handle empty strings for optional fields
         property_unit_id: formData.property_unit_id || null,
         // Multi-unit: backend takes the full set; the array is the source
@@ -1173,6 +1191,54 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
               handleChange("formula_indeksacije", e.target.value)
             }
           />
+        </div>
+      )}
+
+      {formData.indeksacija && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="indeksacija_dan">Dan indeksacije</Label>
+            <Input
+              id="indeksacija_dan"
+              type="number"
+              min="1"
+              max="31"
+              value={formData.indeksacija_dan}
+              onChange={(e) =>
+                handleChange("indeksacija_dan", e.target.value)
+              }
+              placeholder="npr. 1"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="indeksacija_mjesec">Mjesec indeksacije</Label>
+            <select
+              id="indeksacija_mjesec"
+              value={formData.indeksacija_mjesec}
+              onChange={(e) =>
+                handleChange("indeksacija_mjesec", e.target.value)
+              }
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <option value="">— odaberi —</option>
+              <option value="1">Siječanj</option>
+              <option value="2">Veljača</option>
+              <option value="3">Ožujak</option>
+              <option value="4">Travanj</option>
+              <option value="5">Svibanj</option>
+              <option value="6">Lipanj</option>
+              <option value="7">Srpanj</option>
+              <option value="8">Kolovoz</option>
+              <option value="9">Rujan</option>
+              <option value="10">Listopad</option>
+              <option value="11">Studeni</option>
+              <option value="12">Prosinac</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Indeksacija se primjenjuje na ovaj datum svake godine dok
+              ugovor traje.
+            </p>
+          </div>
         </div>
       )}
 

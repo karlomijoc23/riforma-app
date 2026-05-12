@@ -904,6 +904,17 @@ const UgovorDetailPage = () => {
                       {contract.indeks || "Nije definiran"}
                     </span>
                   </div>
+                  {contract.indeksacija_dan && contract.indeksacija_mjesec && (
+                    <div className="flex justify-between pt-2 border-t border-blue-200/50">
+                      <span className="text-muted-foreground">
+                        Datum primjene (godišnje)
+                      </span>
+                      <span className="font-medium">
+                        {String(contract.indeksacija_dan).padStart(2, "0")}.
+                        {String(contract.indeksacija_mjesec).padStart(2, "0")}.
+                      </span>
+                    </div>
+                  )}
                   {contract.formula_indeksacije && (
                     <div className="pt-2 border-t border-blue-200/50">
                       <span className="text-xs text-muted-foreground block mb-1">

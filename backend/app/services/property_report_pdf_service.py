@@ -119,6 +119,10 @@ async def _build_context() -> Dict[str, Any]:
         povrsina = float(p.povrsina or 0)
         vrsta = p.vrsta or "ostalo"
 
+        # ROI = godišnji prihod / tržišna vrijednost. Bez tržišne
+        # vrijednosti je nedefiniran (None — template prikaže "—").
+        roi_pct = (monthly_income * 12 / market_value * 100) if market_value > 0 else None
+
         enriched.append({
             "id": p.id,
             "naziv": p.naziv,
@@ -127,6 +131,7 @@ async def _build_context() -> Dict[str, Any]:
             "type_label": _type_label(vrsta),
             "type_color": _type_color(vrsta),
             "povrsina": povrsina,
+            "roi_pct": roi_pct,
             "trzisna_vrijednost": market_value,
             "monthly_income": monthly_income,
             "occupancy_percent": occupancy,

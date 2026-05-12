@@ -21,6 +21,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     Table,
     Text,
@@ -658,6 +659,15 @@ class UgovoriRow(Base):
     indeks: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     formula_indeksacije: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True
+    )
+    # Dan i mjesec u godini kad se primjenjuje indeksacija (ponavlja se
+    # godišnje dok ugovor traje). Oba polja su nullable; popunjavaju se
+    # samo kad `indeksacija = True`.
+    indeksacija_dan: Mapped[Optional[int]] = mapped_column(
+        SmallInteger, nullable=True
+    )
+    indeksacija_mjesec: Mapped[Optional[int]] = mapped_column(
+        SmallInteger, nullable=True
     )
     obveze_odrzavanja: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True

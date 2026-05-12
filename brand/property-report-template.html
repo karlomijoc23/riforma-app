@@ -155,9 +155,9 @@
           <p class="kpi__sub">Godišnje {{ totals.annual_income | currency }}</p>
         </td>
         <td class="kpi--positive">
-          <p class="kpi__label">Prinos (yield)</p>
+          <p class="kpi__label">Sveukupni ROI</p>
           <div class="kpi__value">{{ totals.avg_yield }} %</div>
-          <p class="kpi__sub">Prosj. zauzeće {{ totals.avg_occupancy }} %</p>
+          <p class="kpi__sub">godišnji prihod / vrijednost portfelja</p>
         </td>
         <td>
           <p class="kpi__label">Aktivni ugovori</p>
@@ -283,12 +283,13 @@
     <table class="data-table">
       <thead>
         <tr>
-          <th style="width:30%">Nekretnina</th>
+          <th style="width:26%">Nekretnina</th>
           <th>Vrsta</th>
           <th class="num">Površina</th>
           <th class="num">Tržišna vrijednost</th>
           <th class="num">Mj. prihod</th>
           <th>Popunjenost</th>
+          <th class="num">ROI</th>
           <th class="num">Ugovori</th>
         </tr>
       </thead>
@@ -311,6 +312,9 @@
               <div class="stripe__fill" style="width: {{ p.occupancy_percent | clamp_pct }}%"></div>
             </div>
           </td>
+          <td class="num fw-semibold">
+            {% if p.roi_pct is not none %}{{ "%.1f"|format(p.roi_pct) }} %{% else %}—{% endif %}
+          </td>
           <td class="num">{{ p.active_contract_count }}</td>
         </tr>
         {% endfor %}
@@ -323,6 +327,7 @@
           <td class="num">{{ totals.total_value | currency }}</td>
           <td class="num">{{ totals.monthly_income | currency }}</td>
           <td>{{ totals.avg_occupancy }} %</td>
+          <td class="num">{{ totals.avg_yield }} %</td>
           <td class="num">{{ totals.total_active_contracts }}</td>
         </tr>
       </tfoot>
