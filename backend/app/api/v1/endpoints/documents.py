@@ -1,5 +1,6 @@
 import logging
 import re
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -7,10 +8,11 @@ from typing import Any, Dict, Optional
 
 from app.api import deps
 from app.core.config import get_settings
+from app.core.limiter import limiter
 from app.db.repositories.instance import dokumenti
 from app.models.domain import TipDokumenta
 from app.models.tables import DokumentiRow
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -68,6 +70,26 @@ def _sanitize_filename(filename: str) -> str:
     return filename
 
 
+def _ensure_disk_space(upload_dir: Path, min_free_mb: int) -> None:
+    """Raise 507 if free disk space below threshold. Skips if statvfs unavailable."""
+    try:
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        free_bytes = shutil.disk_usage(str(upload_dir)).free
+    except (OSError, AttributeError) as exc:
+        logger.warning("Disk space check skipped for %s: %s", upload_dir, exc)
+        return
+    if free_bytes < min_free_mb * 1024 * 1024:
+        logger.error(
+            "Upload rejected — insufficient disk space (%d MB free, %d MB required)",
+            free_bytes // (1024 * 1024),
+            min_free_mb,
+        )
+        raise HTTPException(
+            status_code=507,
+            detail="Nedovoljno prostora na poslužitelju. Obratite se administratoru.",
+        )
+
+
 def _normalize_file_path(item: dict) -> None:
     """Derive putanja_datoteke from file_path for consistent API responses."""
     fp = item.get("file_path")
@@ -119,13 +141,16 @@ async def get_documents(
         Depends(deps.require_tenant()),
     ],
 )
+@limiter.limit("30/minute")
 async def create_document(
+    request: Request,
     naziv: str = Form(...),
     tip: str = Form("ostalo"),
     opis: Optional[str] = Form(None),
     nekretnina_id: Optional[str] = Form(None),
     zakupnik_id: Optional[str] = Form(None),
     ugovor_id: Optional[str] = Form(None),
+    property_unit_id: Optional[str] = Form(None),
     maintenance_task_id: Optional[str] = Form(None),
     datum_isteka: Optional[str] = Form(None),
     metadata: Optional[str] = Form(None),
@@ -179,6 +204,8 @@ async def create_document(
                 detail=f"Datoteka je prevelika. Maksimalna veličina: {MAX_FILE_SIZE_MB}MB",
             )
 
+        _ensure_disk_space(settings.UPLOAD_DIR, settings.UPLOAD_MIN_FREE_MB)
+
         safe_filename = _sanitize_filename(file.filename)
         filename = f"{doc_id}_{safe_filename}"
         try:
@@ -203,10 +230,47 @@ async def create_document(
 
         file_path = str(dest_path)
 
+        # Image uploads: auto-generate thumbnail + medium variants so
+        # gallery rendering doesn't pull megabytes per thumb. URL-relative
+        # paths stored in metadata_json (e.g. "uploads/{id}_thumb.jpg") so
+        # the frontend can render via the same /uploads/{file} auth route.
+        if file.content_type and file.content_type.startswith("image/"):
+            try:
+                from PIL import Image
+
+                variants = parsed_metadata.get("variants") if parsed_metadata else None
+                if not isinstance(variants, dict):
+                    variants = {}
+
+                with Image.open(dest_path) as img:
+                    # Convert RGBA → RGB so JPEG variants don't crash on PNG
+                    # uploads with transparency.
+                    rgb = img.convert("RGB") if img.mode in ("RGBA", "P") else img
+                    for label, size in (("thumb", (200, 200)), ("medium", (800, 600))):
+                        variant_img = rgb.copy()
+                        variant_img.thumbnail(size, Image.Resampling.LANCZOS)
+                        variant_name = f"{doc_id}_{label}.jpg"
+                        variant_path = settings.UPLOAD_DIR / variant_name
+                        variant_img.save(
+                            variant_path, "JPEG", quality=85, optimize=True
+                        )
+                        variants[label] = f"uploads/{variant_name}"
+
+                if parsed_metadata is None:
+                    parsed_metadata = {}
+                parsed_metadata["variants"] = variants
+            except Exception as exc:
+                # Variants are nice-to-have, not critical. Log and move on
+                # so a missing libjpeg or bad EXIF doesn't fail the upload.
+                logger.warning(
+                    "Thumbnail generation skipped for %s: %s", dest_path, exc
+                )
+
     # Sanitize empty strings to None for FK fields
     clean_nekretnina_id = nekretnina_id if nekretnina_id else None
     clean_zakupnik_id = zakupnik_id if zakupnik_id else None
     clean_ugovor_id = ugovor_id if ugovor_id else None
+    clean_property_unit_id = property_unit_id if property_unit_id else None
     clean_maintenance_task_id = maintenance_task_id if maintenance_task_id else None
 
     doc_data = {
@@ -217,6 +281,7 @@ async def create_document(
         "nekretnina_id": clean_nekretnina_id,
         "zakupnik_id": clean_zakupnik_id,
         "ugovor_id": clean_ugovor_id,
+        "property_unit_id": clean_property_unit_id,
         "maintenance_task_id": clean_maintenance_task_id,
         "datum_isteka": datum_isteka,
         "metadata_json": parsed_metadata,
@@ -442,17 +507,30 @@ async def delete_document(
     if not item:
         raise HTTPException(status_code=404, detail="Dokument nije pronađen")
 
-    # Delete file (with path traversal protection)
-    file_path = item.file_path
-    if file_path:
-        path = Path(file_path).resolve()
+    # Collect every path to remove: original + any thumbnail/medium variants
+    # stored in metadata_json. All variants live in UPLOAD_DIR so the same
+    # traversal check applies.
+    paths_to_remove = []
+    if item.file_path:
+        paths_to_remove.append(item.file_path)
+    meta = item.metadata_json or {}
+    variants = meta.get("variants") if isinstance(meta, dict) else None
+    if isinstance(variants, dict):
+        for rel in variants.values():
+            if rel and rel.startswith("uploads/"):
+                paths_to_remove.append(
+                    str(settings.UPLOAD_DIR / rel[len("uploads/"):])
+                )
+
+    for raw in paths_to_remove:
+        path = Path(raw).resolve()
         if str(path).startswith(str(settings.UPLOAD_DIR.resolve())) and path.exists():
             try:
                 path.unlink()
             except Exception as e:
-                logger.warning(f"Failed to delete file {file_path}: {e}")
+                logger.warning(f"Failed to delete file {raw}: {e}")
         elif path.exists():
-            logger.warning(f"Blocked file deletion outside uploads dir: {file_path}")
+            logger.warning(f"Blocked file deletion outside uploads dir: {raw}")
 
     await dokumenti.delete_by_id(id)
     return {"message": "Dokument uspješno obrisan"}

@@ -6,7 +6,6 @@ import pytest
 
 os.environ.setdefault("AUTH_SECRET", "test-secret")
 os.environ.setdefault("USE_IN_MEMORY_DB", "true")
-os.environ.setdefault("OPENAI_API_KEY", "test")
 
 from app.core.config import get_settings  # noqa: E402
 

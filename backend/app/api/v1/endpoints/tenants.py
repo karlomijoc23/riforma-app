@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date
 from typing import Any, Dict, Optional
 
 from app.api import deps
@@ -12,6 +13,7 @@ from app.db.repositories.instance import (
 from app.models.domain import ZakupnikStatus, ZakupnikTip
 from app.models.tables import ZakupniciRow
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import Response as FastAPIResponse
 from pydantic import BaseModel
 from sqlalchemy import or_
 
@@ -201,6 +203,47 @@ async def get_tenant(
     return zakupnici.to_dict(item)
 
 
+@router.get(
+    "/{id}/statement",
+    dependencies=[Depends(deps.require_scopes("financials:read"))],
+)
+async def export_tenant_statement(
+    id: str,
+    period_od: str,
+    period_do: str,
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Render a branded PDF "specifikacija zaduženja" for the tenant
+    covering the given period. Lists every bill, totals, outstanding
+    balance. Falls back with 503 if WeasyPrint isn't installed."""
+    from app.services.tenant_statement_service import render_tenant_statement_pdf
+
+    try:
+        po = date.fromisoformat(period_od)
+        pd_ = date.fromisoformat(period_do)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail="period_od / period_do moraju biti u formatu YYYY-MM-DD.",
+        )
+    if po > pd_:
+        raise HTTPException(
+            status_code=422,
+            detail="period_od ne može biti nakon period_do.",
+        )
+
+    pdf_bytes = await render_tenant_statement_pdf(id, po, pd_)
+    safe_period = f"{po.isoformat()}_{pd_.isoformat()}"
+    filename = f"specifikacija-{id[:8]}-{safe_period}.pdf"
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
 @router.put("/{id}", dependencies=[Depends(deps.require_scopes("tenants:update"))])
 async def update_tenant(
     id: str,
@@ -230,3 +273,159 @@ async def delete_tenant(
 
     await zakupnici.delete_by_id(id)
     return {"message": "Zakupnik uspješno obrisan"}
+
+
+class InviteTenantUserBody(BaseModel):
+    email: Optional[str] = None  # falls back to zakupnik.kontakt_email
+    full_name: Optional[str] = None
+
+
+@router.post(
+    "/{id}/invite-user",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(deps.require_scopes("tenants:update")),
+        Depends(deps.require_tenant()),
+    ],
+)
+async def invite_tenant_user(
+    id: str,
+    body: InviteTenantUserBody = InviteTenantUserBody(),
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Create a `tenant`-role user account and link it to this zakupnik
+    so the zakupnik can self-serve via `/self/*` endpoints.
+
+    Returns the new user payload + a one-time temporary password; the
+    admin shares the password with the zakupnik through a secure channel.
+    """
+    import secrets
+    import string
+
+    from app.core.security import hash_password
+    from app.core.roles import resolve_role_scopes
+    from app.db.repositories.instance import users
+
+    existing = await zakupnici.get_by_id(id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Zakupnik nije pronađen")
+    if existing.user_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Zakupnik već ima povezan korisnički račun. Obrišite ga prije"
+                " ponovne pozivnice."
+            ),
+        )
+
+    email = (body.email or existing.kontakt_email or "").strip().lower()
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Email adresa je obavezna — postavite kontakt_email na"
+                " zakupniku ili je proslijedite u zahtjevu."
+            ),
+        )
+
+    full_name = (
+        body.full_name
+        or existing.kontakt_ime
+        or existing.naziv_firme
+        or existing.ime_prezime
+        or "Zakupnik"
+    )
+
+    if await users.find_one(email=email):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Korisnik s email adresom '{email}' već postoji.",
+        )
+
+    alphabet = string.ascii_letters + string.digits + "!@#$%"
+    temp_password = "".join(secrets.choice(alphabet) for _ in range(16))
+
+    user_data = {
+        "email": email,
+        "full_name": full_name,
+        "role": "tenant",
+        "scopes": resolve_role_scopes("tenant", []),
+        "password_hash": hash_password(temp_password),
+        # Tenant must rotate before doing anything in the portal.
+        "must_change_password": True,
+    }
+    new_user = await users.create(user_data)
+
+    await zakupnici.update_by_id(id, {"user_id": new_user.id})
+
+    # Prefer to email the temp password. We only echo it back to the admin
+    # if SMTP isn't configured / the send failed — otherwise plaintext
+    # passwords leak into proxy access logs, Sentry breadcrumbs, etc.
+    from app.core.email import send_email
+
+    invite_html = (
+        '<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">'
+        '<div style="background:#1d3557;color:#fff;padding:18px;'
+        'border-radius:8px 8px 0 0;">'
+        f'<h2 style="margin:0;">Dobrodošli, {full_name}</h2>'
+        '<p style="margin:4px 0 0;opacity:0.85;">Riforma · self-service portal</p>'
+        '</div>'
+        '<div style="padding:18px;background:#f8fafc;border:1px solid #e2e8f0;'
+        'border-radius:0 0 8px 8px;">'
+        f'<p>Vaš upravitelj portfelja kreirao Vam je račun s adresom '
+        f'<strong>{email}</strong>.</p>'
+        '<p>Privremena lozinka (potrebno ju je promijeniti pri prvoj prijavi):</p>'
+        f'<p style="font-family:monospace;font-size:18px;background:#e2e8f0;'
+        f'padding:10px 14px;border-radius:6px;">{temp_password}</p>'
+        '<p style="margin-top:14px;color:#64748b;font-size:13px;">'
+        'Ova poruka je automatski generirana. Ako je dobijete greškom,'
+        ' obratite se upravitelju.</p>'
+        '</div></div>'
+    )
+    sent = await send_email(
+        email, "Riforma · vaš pristupni račun", invite_html
+    )
+
+    response = {
+        "user_id": new_user.id,
+        "email": email,
+        "full_name": full_name,
+        "delivery": "email" if sent else "response",
+        "message": (
+            "Korisnički račun kreiran. Privremena lozinka poslana e-poštom."
+            if sent
+            else (
+                "Korisnički račun kreiran. SMTP nije konfiguriran —"
+                " privremena lozinka je u 'temp_password' polju."
+                " Podijelite je sa zakupnikom sigurnim kanalom."
+            )
+        ),
+    }
+    if not sent:
+        # Only expose the secret when delivery actually failed.
+        response["temp_password"] = temp_password
+    return response
+
+
+@router.delete(
+    "/{id}/user-link",
+    dependencies=[
+        Depends(deps.require_scopes("tenants:update")),
+        Depends(deps.require_tenant()),
+    ],
+)
+async def unlink_tenant_user(
+    id: str,
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Disconnect the linked user account from this zakupnik. The user
+    row stays (admin can decide separately whether to deactivate it via
+    `/users` endpoints) but loses access to `/self/*` for this zakupnik.
+    """
+    existing = await zakupnici.get_by_id(id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Zakupnik nije pronađen")
+    if not existing.user_id:
+        return {"message": "Zakupnik nema povezan korisnički račun."}
+    await zakupnici.update_by_id(id, {"user_id": None})
+    return {"message": "Korisnički račun odvojen od zakupnika."}

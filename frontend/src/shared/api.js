@@ -34,9 +34,19 @@ export const getErrorCode = (error) => {
   return error?.response?.data?.detail?.code || "UNKNOWN";
 };
 
+// Two clients, same interceptors. The default `apiClient` has a tight
+// 10-second timeout — CRUD calls should never need longer, and a hung
+// request shouldn't freeze the page for two minutes. `aiClient` keeps the
+// long 120s timeout for endpoints that legitimately take a while:
+// Claude/OpenAI calls, server-side PDF rendering, CSV import/export.
 export const apiClient = axios.create({
-  timeout: 120000, // 2 minutes timeout for AI operations
-  withCredentials: true, // Send httpOnly cookies with every request
+  timeout: 10000,
+  withCredentials: true,
+});
+
+export const aiClient = axios.create({
+  timeout: 120000,
+  withCredentials: true,
 });
 
 const TENANT_STORAGE_KEY = "riforma:currentTenantId";
@@ -111,58 +121,74 @@ const getCookie = (name) => {
 
 const MUTATING_METHODS = ["post", "put", "patch", "delete"];
 
-apiClient.interceptors.request.use((config) => {
-  config.headers = config.headers || {};
+const attachRequestInterceptor = (client) => {
+  client.interceptors.request.use((config) => {
+    config.headers = config.headers || {};
 
-  // CSRF: attach the csrf_token cookie value as a header on mutating requests
-  if (MUTATING_METHODS.includes(config.method?.toLowerCase())) {
-    const csrfToken = getCookie("csrf_token");
-    if (csrfToken) {
-      config.headers["X-CSRF-Token"] = csrfToken;
+    // CSRF: attach the csrf_token cookie value as a header on mutating requests
+    if (MUTATING_METHODS.includes(config.method?.toLowerCase())) {
+      const csrfToken = getCookie("csrf_token");
+      if (csrfToken) {
+        config.headers["X-CSRF-Token"] = csrfToken;
+      }
     }
-  }
 
-  const tenantId = getActiveTenantId();
-  if (tenantId) {
-    config.headers["X-Tenant-Id"] = tenantId;
-  }
-  return config;
-});
+    const tenantId = getActiveTenantId();
+    if (tenantId) {
+      config.headers["X-Tenant-Id"] = tenantId;
+    }
+    return config;
+  });
+};
 
-apiClient.interceptors.response.use(
+const buildResponseInterceptor = () => [
   (response) => {
     // Automatic UI Update Trigger
-    // Detect mutation methods and dispatch global event
+    // Detect mutation methods and dispatch one event per resource that may
+    // have been touched. Some endpoints cascade — a contract write can flip
+    // unit / parking status server-side, so we also invalidate `nekretnine`
+    // (which fetches units + parkings together) on every /ugovori mutation.
     const { method, url } = response.config;
     if (MUTATING_METHODS.includes(method?.toLowerCase())) {
-      let resource = "";
+      const resources = new Set();
       if (
         url.includes("/nekretnine") ||
         url.includes("/units") ||
         url.includes("/parking")
       ) {
-        resource = "nekretnine";
-      } else if (url.includes("/zakupnici")) {
-        resource = "zakupnici";
-      } else if (url.includes("/ugovori")) {
-        resource = "ugovori";
-      } else if (url.includes("/dokumenti")) {
-        resource = "dokumenti";
-      } else if (url.includes("/maintenance")) {
-        resource = "maintenance";
-      } else if (url.includes("/racuni")) {
-        resource = "racuni";
-      } else if (url.includes("/tenants")) {
-        resource = "tenants";
-      } else if (url.includes("/oglasi")) {
-        resource = "oglasi";
-      } else if (url.includes("/projekti")) {
-        resource = "projekti";
-      } else if (url.includes("/dobavljaci")) {
-        resource = "dobavljaci";
+        resources.add("nekretnine");
+      }
+      if (url.includes("/zakupnici")) {
+        resources.add("zakupnici");
+      }
+      if (url.includes("/ugovori")) {
+        resources.add("ugovori");
+        // Contracts cascade unit/parking status — also refresh nekretnine.
+        resources.add("nekretnine");
+      }
+      if (url.includes("/dokumenti")) {
+        resources.add("dokumenti");
+      }
+      if (url.includes("/maintenance")) {
+        resources.add("maintenance");
+      }
+      if (url.includes("/racuni")) {
+        resources.add("racuni");
+      }
+      if (url.includes("/tenants")) {
+        resources.add("tenants");
+      }
+      if (url.includes("/oglasi")) {
+        resources.add("oglasi");
+      }
+      if (url.includes("/projekti")) {
+        resources.add("projekti");
+      }
+      if (url.includes("/dobavljaci")) {
+        resources.add("dobavljaci");
       }
 
-      if (resource) {
+      for (const resource of resources) {
         window.dispatchEvent(
           new CustomEvent("entity:mutation", { detail: { resource } }),
         );
@@ -195,7 +221,12 @@ apiClient.interceptors.response.use(
     }
     return Promise.reject(error);
   },
-);
+];
+
+attachRequestInterceptor(apiClient);
+attachRequestInterceptor(aiClient);
+apiClient.interceptors.response.use(...buildResponseInterceptor());
+aiClient.interceptors.response.use(...buildResponseInterceptor());
 
 export const api = {
   login: (payload) => apiClient.post(`${API_ROOT}/auth/login`, payload),
@@ -244,8 +275,28 @@ export const api = {
   updateZakupnik: (id, data) =>
     apiClient.put(`${API_ROOT}/zakupnici/${id}`, data),
   deleteZakupnik: (id) => apiClient.delete(`${API_ROOT}/zakupnici/${id}`),
+  getZakupnik: (id) => apiClient.get(`${API_ROOT}/zakupnici/${id}`),
   getZakupnikOverview: (id) =>
     apiClient.get(`${API_ROOT}/zakupnici/${id}/overview`),
+  inviteTenantUser: (id, payload = {}) =>
+    apiClient.post(`${API_ROOT}/zakupnici/${id}/invite-user`, payload),
+  unlinkTenantUser: (id) =>
+    apiClient.delete(`${API_ROOT}/zakupnici/${id}/user-link`),
+
+  // Self password change (any role)
+  changeMyPassword: (data) =>
+    apiClient.put(`${API_ROOT}/users/me/password`, data),
+
+  // Tenant self-service portal
+  getSelfProfile: () => apiClient.get(`${API_ROOT}/self/profile`),
+  getSelfContracts: () => apiClient.get(`${API_ROOT}/self/contracts`),
+  getSelfBills: (params = {}) =>
+    apiClient.get(`${API_ROOT}/self/bills`, { params }),
+  getSelfMaintenance: () => apiClient.get(`${API_ROOT}/self/maintenance`),
+  submitSelfMaintenance: (data) =>
+    apiClient.post(`${API_ROOT}/self/maintenance`, data),
+  getSelfDocuments: () => apiClient.get(`${API_ROOT}/self/documents`),
+  getSelfSummary: () => apiClient.get(`${API_ROOT}/self/summary`),
 
   getUgovori: (opts = {}) => {
     const { signal, ...params } = opts;
@@ -329,7 +380,7 @@ export const api = {
   parsePdfContract: (file) => {
     const formData = new FormData();
     formData.append("file", file);
-    return apiClient.post(`${API_ROOT}/ai/parse-pdf-contract`, formData);
+    return aiClient.post(`${API_ROOT}/ai/parse-pdf-contract`, formData);
   },
 
   getMaintenanceTasks: (opts = {}) => {
@@ -414,7 +465,7 @@ export const api = {
   deleteRacun: (id) => apiClient.delete(`${API_ROOT}/racuni/${id}`),
   updatePreknjizavanje: (id, data) =>
     apiClient.patch(`${API_ROOT}/racuni/${id}/preknjizavanje`, data),
-  parseRacunWithAI: (id) => apiClient.post(`${API_ROOT}/racuni/${id}/parse-ai`),
+  parseRacunWithAI: (id) => aiClient.post(`${API_ROOT}/racuni/${id}/parse-ai`),
   recordPayment: (id, data) =>
     apiClient.post(`${API_ROOT}/racuni/${id}/payment`, data),
   getTenantLedger: (zakupnikId) =>
@@ -423,6 +474,41 @@ export const api = {
     apiClient.get(`${API_ROOT}/racuni/analytics/summary`, { params }),
   getTaxSummary: (params = {}) =>
     apiClient.get(`${API_ROOT}/racuni/tax-summary`, { params }),
+  // CAM reconciliation: yearly per-property utility breakdown vs prev year
+  getCamReconciliation: (nekretninaId, godina) =>
+    apiClient.get(`${API_ROOT}/racuni/analytics/cam-reconciliation`, {
+      params: { nekretnina_id: nekretninaId, godina },
+    }),
+  // Anomaly detection: bills X% above the rolling 12-month average
+  getBillAnomalies: (thresholdPct = 30) =>
+    apiClient.get(`${API_ROOT}/racuni/analytics/anomalies`, {
+      params: { threshold_pct: thresholdPct },
+    }),
+
+  // Bill splitting (master → child charges per unit)
+  previewBillSplit: (id, body) =>
+    apiClient.post(`${API_ROOT}/racuni/${id}/split-preview`, body),
+  splitBill: (id, body) =>
+    apiClient.post(`${API_ROOT}/racuni/${id}/split`, body),
+  getBillChildren: (id) =>
+    apiClient.get(`${API_ROOT}/racuni/${id}/children`),
+  removeBillSplit: (id) =>
+    apiClient.delete(`${API_ROOT}/racuni/${id}/split`),
+
+  // AI auto-save: upload PDF → AI parse → draft bill in one round-trip
+  parseAndCreateRacun: (file, nekretninaId) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (nekretninaId) formData.append("nekretnina_id", nekretninaId);
+    return aiClient.post(`${API_ROOT}/racuni/parse-and-create`, formData);
+  },
+
+  // Tenant statement PDF (period summary)
+  getTenantStatementPdf: (zakupnikId, periodOd, periodDo) =>
+    aiClient.get(`${API_ROOT}/zakupnici/${zakupnikId}/statement`, {
+      params: { period_od: periodOd, period_do: periodDo },
+      responseType: "blob",
+    }),
 
   // Dobavljaci (Vendors)
   getVendors: (params = {}) =>
@@ -435,7 +521,32 @@ export const api = {
 
   // AI Monthly Report
   generateMonthlyReport: (data) =>
-    apiClient.post(`${API_ROOT}/ai/monthly-report`, data),
+    aiClient.post(`${API_ROOT}/ai/monthly-report`, data),
+  exportMonthlyReportPdf: (payload) =>
+    aiClient.post(`${API_ROOT}/ai/monthly-report/export-pdf`, payload, {
+      responseType: "blob",
+    }),
+  exportPortfolioReportPdf: () =>
+    aiClient.get(`${API_ROOT}/nekretnine/portfolio-report/export-pdf`, {
+      responseType: "blob",
+    }),
+  exportMaintenanceReportPdf: () =>
+    aiClient.get(`${API_ROOT}/maintenance/report/export-pdf`, {
+      responseType: "blob",
+    }),
+  exportProjectReportPdf: (projectId) =>
+    aiClient.get(`${API_ROOT}/projekti/${projectId}/export-pdf`, {
+      responseType: "blob",
+    }),
+  exportPropertyDetailPdf: (propertyId) =>
+    aiClient.get(`${API_ROOT}/nekretnine/${propertyId}/export-pdf`, {
+      responseType: "blob",
+    }),
+  exportContractsReportPdf: (params = {}) =>
+    aiClient.get(`${API_ROOT}/ugovori/report/export-pdf`, {
+      params,
+      responseType: "blob",
+    }),
 
   // Settings
   getSettings: () => apiClient.get(`${API_ROOT}/settings`),
@@ -461,21 +572,21 @@ export const api = {
 
   // Export CSV
   exportNekretnine: () =>
-    apiClient.get(`${API_ROOT}/export/nekretnine`, { responseType: "blob" }),
+    aiClient.get(`${API_ROOT}/export/nekretnine`, { responseType: "blob" }),
   exportZakupnici: () =>
-    apiClient.get(`${API_ROOT}/export/zakupnici`, { responseType: "blob" }),
+    aiClient.get(`${API_ROOT}/export/zakupnici`, { responseType: "blob" }),
   exportUgovori: () =>
-    apiClient.get(`${API_ROOT}/export/ugovori`, { responseType: "blob" }),
+    aiClient.get(`${API_ROOT}/export/ugovori`, { responseType: "blob" }),
   exportMaintenance: () =>
-    apiClient.get(`${API_ROOT}/export/maintenance`, { responseType: "blob" }),
+    aiClient.get(`${API_ROOT}/export/maintenance`, { responseType: "blob" }),
   exportRacuni: () =>
-    apiClient.get(`${API_ROOT}/export/racuni`, { responseType: "blob" }),
+    aiClient.get(`${API_ROOT}/export/racuni`, { responseType: "blob" }),
 
   // Import CSV
   importCsv: (endpoint, file) => {
     const formData = new FormData();
     formData.append("file", file);
-    return apiClient.post(`${API_ROOT}/import/${endpoint}`, formData);
+    return aiClient.post(`${API_ROOT}/import/${endpoint}`, formData);
   },
 
   // Contract Approval
@@ -486,6 +597,14 @@ export const api = {
   rejectUgovor: (id, data) =>
     apiClient.post(`${API_ROOT}/ugovori/${id}/reject`, data),
   withdrawUgovor: (id) => apiClient.post(`${API_ROOT}/ugovori/${id}/withdraw`),
+  exportUgovorPdf: (id) =>
+    aiClient.get(`${API_ROOT}/ugovori/${id}/export-pdf`, {
+      responseType: "blob",
+    }),
+  exportAneksPdf: (id, data = {}) =>
+    aiClient.post(`${API_ROOT}/ugovori/${id}/export-aneks-pdf`, data, {
+      responseType: "blob",
+    }),
 
   // Contract Renewal & Escalation
   previewEscalation: (id, params = {}) =>
@@ -504,7 +623,7 @@ export const api = {
     }),
   deleteOglas: (id) => apiClient.delete(`${API_ROOT}/oglasi/${id}`),
   exportOglasiXml: (portal) =>
-    apiClient.get(`${API_ROOT}/oglasi/xml-export`, {
+    aiClient.get(`${API_ROOT}/oglasi/xml-export`, {
       params: portal ? { portal } : {},
       responseType: "blob",
     }),
@@ -534,12 +653,12 @@ export const api = {
   agentGetConversation: (id) =>
     apiClient.get(`${API_ROOT}/agent/conversations/${id}`),
   agentSendMessage: (conversationId, data) =>
-    apiClient.post(
+    aiClient.post(
       `${API_ROOT}/agent/conversations/${conversationId}/messages`,
       data,
     ),
   agentConfirmAction: (conversationId, data) =>
-    apiClient.post(
+    aiClient.post(
       `${API_ROOT}/agent/conversations/${conversationId}/confirm`,
       data,
     ),

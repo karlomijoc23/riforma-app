@@ -1,11 +1,14 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { api } from "../../shared/api";
+import {
+  downloadPdfFromResponse,
+  extractBlobErrorDetail,
+} from "../../shared/downloadBlob";
 import {
   formatCurrency,
   formatArea,
   formatPercentage,
   formatPropertyType,
-  pdfDateStamp,
 } from "../../shared/formatters";
 import {
   Loader2,
@@ -29,8 +32,8 @@ const PropertyReport = () => {
   const navigate = useNavigate();
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(null);
-  const reportRef = useRef(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -111,98 +114,17 @@ const PropertyReport = () => {
   }, []);
 
   const handleDownloadPdf = useCallback(async () => {
-    const element = reportRef.current;
-    if (!element) return;
+    setDownloading(true);
     try {
-      toast.info("Generiranje PDF-a...");
-      const html2canvas = (await import("html2canvas")).default;
-      const { jsPDF } = await import("jspdf");
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        windowWidth: element.scrollWidth,
-      });
-      const pdf = new jsPDF({
-        orientation: "landscape",
-        unit: "mm",
-        format: "a4",
-      });
-      const pageWidth = 297,
-        pageHeight = 210,
-        margin = 8;
-      const usableWidth = pageWidth - margin * 2;
-      const usableHeight = pageHeight - margin * 2 - 6;
-      const imgWidth = usableWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-      if (imgHeight <= usableHeight) {
-        pdf.addImage(
-          canvas.toDataURL("image/png"),
-          "PNG",
-          margin,
-          margin,
-          imgWidth,
-          imgHeight,
-        );
-        pdf.setFontSize(7);
-        pdf.setTextColor(160);
-        pdf.text("Stranica 1 od 1", pageWidth / 2, pageHeight - 4, {
-          align: "center",
-        });
-      } else {
-        let yOffset = 0,
-          page = 0;
-        const totalPages = Math.ceil(imgHeight / usableHeight);
-        while (yOffset < imgHeight) {
-          if (page > 0) pdf.addPage();
-          const sourceY = (yOffset / imgHeight) * canvas.height;
-          const sourceHeight = Math.min(
-            (usableHeight / imgHeight) * canvas.height,
-            canvas.height - sourceY,
-          );
-          const pageCanvas = document.createElement("canvas");
-          pageCanvas.width = canvas.width;
-          pageCanvas.height = sourceHeight;
-          const ctx = pageCanvas.getContext("2d");
-          ctx.drawImage(
-            canvas,
-            0,
-            sourceY,
-            canvas.width,
-            sourceHeight,
-            0,
-            0,
-            canvas.width,
-            sourceHeight,
-          );
-          const renderHeight = Math.min(usableHeight, imgHeight - yOffset);
-          pdf.addImage(
-            pageCanvas.toDataURL("image/png"),
-            "PNG",
-            margin,
-            margin,
-            imgWidth,
-            renderHeight,
-          );
-          pdf.setFontSize(7);
-          pdf.setTextColor(160);
-          pdf.text(
-            `Stranica ${page + 1} od ${totalPages}`,
-            pageWidth / 2,
-            pageHeight - 4,
-            { align: "center" },
-          );
-          yOffset += usableHeight;
-          page++;
-        }
-      }
-      pdf.save(`Izvjestaj_Portfelj_Nekretnina_${pdfDateStamp()}.pdf`);
-      toast.success("PDF uspješno generiran");
+      const res = await api.exportPortfolioReportPdf();
+      downloadPdfFromResponse(res, "riforma-izvjestaj-portfelja.pdf");
+      toast.success("PDF preuzet.");
     } catch (err) {
       console.error("PDF generation failed", err);
-      toast.error("Greška pri generiranju PDF-a");
+      const detail = await extractBlobErrorDetail(err);
+      toast.error(detail);
+    } finally {
+      setDownloading(false);
     }
   }, []);
 
@@ -285,8 +207,18 @@ const PropertyReport = () => {
           <h1 className="text-lg font-semibold">Izvještaj portfelja</h1>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleDownloadPdf}>
-            <Download className="mr-1 h-4 w-4" /> PDF
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDownloadPdf}
+            disabled={downloading}
+          >
+            {downloading ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-1 h-4 w-4" />
+            )}
+            PDF
           </Button>
           <Button size="sm" onClick={() => window.print()}>
             <Printer className="mr-1 h-4 w-4" /> Ispis
@@ -296,7 +228,6 @@ const PropertyReport = () => {
 
       {/* ═══════════════════ REPORT CONTENT ═══════════════════ */}
       <div
-        ref={reportRef}
         className="max-w-[1100px] mx-auto bg-white"
         style={{
           fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",

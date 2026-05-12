@@ -53,6 +53,7 @@ import {
   getUnitStatusBadgeClass,
   formatUnitStatus,
 } from "../../shared/units";
+import { PARKING_STATUS_CONFIG } from "../../shared/parking";
 import { parseNumericValue, parseSmartNumber } from "../../shared/formatters";
 import { api } from "../../shared/api";
 
@@ -61,6 +62,7 @@ const NekretninarForm = ({
   onSubmit,
   onCancel,
   existingUnits = [],
+  existingParkings = [],
   submitting = false,
 }) => {
   const [formData, setFormData] = useState({
@@ -70,6 +72,8 @@ const NekretninarForm = ({
     broj_kat_cestice: nekretnina?.broj_kat_cestice || "",
     vrsta: nekretnina?.vrsta || "stan",
     povrsina: nekretnina?.povrsina || "",
+    povrsina_objekta: nekretnina?.povrsina_objekta || "",
+    povrsina_zemljista: nekretnina?.povrsina_zemljista || "",
     godina_izgradnje: nekretnina?.godina_izgradnje || "",
     vlasnik: nekretnina?.vlasnik || "",
     udio_vlasnistva: nekretnina?.udio_vlasnistva || "",
@@ -93,6 +97,9 @@ const NekretninarForm = ({
   const [deletedUnitIds, setDeletedUnitIds] = useState([]);
   const [activeContracts, setActiveContracts] = useState([]);
   const [unitToDelete, setUnitToDelete] = useState(null);
+  const [parkings, setParkings] = useState([]);
+  const [deletedParkingIds, setDeletedParkingIds] = useState([]);
+  const [parkingToDelete, setParkingToDelete] = useState(null);
   const navigate = useNavigate();
 
   React.useEffect(() => {
@@ -126,6 +133,27 @@ const NekretninarForm = ({
       );
     }
   }, [existingUnits]);
+
+  // Initialize parkings from existingParkings when they load
+  React.useEffect(() => {
+    if (
+      existingParkings &&
+      existingParkings.length > 0 &&
+      parkings.length === 0
+    ) {
+      setParkings(
+        existingParkings.map((p) => ({
+          ...p,
+          localId: p.id,
+          isExisting: true,
+          osnovna_zakupnina: p.osnovna_zakupnina?.toString() || "",
+          vehicle_plates: Array.isArray(p.vehicle_plates)
+            ? [p.vehicle_plates[0] || "", p.vehicle_plates[1] || ""]
+            : ["", ""],
+        })),
+      );
+    }
+  }, [existingParkings]);
   // Calculate total area from units
   React.useEffect(() => {
     if (units.length > 0) {
@@ -179,6 +207,14 @@ const NekretninarForm = ({
       })),
     [],
   );
+  const parkingStatusOptions = useMemo(
+    () =>
+      Object.entries(PARKING_STATUS_CONFIG).map(([value, config]) => ({
+        value,
+        label: config.label,
+      })),
+    [],
+  );
   const existingUnitsList = useMemo(
     () => sortUnitsByPosition(existingUnits || []),
     [existingUnits],
@@ -215,6 +251,52 @@ const NekretninarForm = ({
     );
   };
 
+  // ── Parking helpers (mirror of unit helpers) ─────────────────────────
+  const createDraftParking = () => ({
+    localId: `new-${Date.now()}-${Math.random()}`,
+    internal_id: "",
+    floor: "",
+    naziv: "",
+    status: "dostupno",
+    osnovna_zakupnina: "",
+    vehicle_plates: ["", ""],
+    notes: "",
+    isExisting: false,
+  });
+
+  const handleAddParking = () => {
+    setParkings((prev) => [...prev, createDraftParking()]);
+    if (!formData.has_parking) {
+      setFormData((prev) => ({ ...prev, has_parking: true }));
+    }
+  };
+
+  const handleRemoveParking = (localId, isExisting) => {
+    if (isExisting) {
+      setDeletedParkingIds((prev) => [...prev, localId]);
+    }
+    setParkings((prev) => prev.filter((p) => p.localId !== localId));
+  };
+
+  const handleUpdateParking = (localId, field, value) => {
+    setParkings((prev) =>
+      prev.map((p) => (p.localId === localId ? { ...p, [field]: value } : p)),
+    );
+  };
+
+  const handleUpdateParkingPlate = (localId, index, value) => {
+    setParkings((prev) =>
+      prev.map((p) => {
+        if (p.localId !== localId) return p;
+        const next = Array.isArray(p.vehicle_plates)
+          ? [...p.vehicle_plates]
+          : ["", ""];
+        next[index] = value.toUpperCase();
+        return { ...p, vehicle_plates: next };
+      }),
+    );
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting) {
@@ -234,6 +316,12 @@ const NekretninarForm = ({
     const data = {
       ...formData,
       povrsina: parseFloat(formData.povrsina) || 0,
+      povrsina_objekta: formData.povrsina_objekta
+        ? parseFloat(formData.povrsina_objekta)
+        : null,
+      povrsina_zemljista: formData.povrsina_zemljista
+        ? parseFloat(formData.povrsina_zemljista)
+        : null,
       godina_izgradnje: formData.godina_izgradnje
         ? parseInt(formData.godina_izgradnje)
         : null,
@@ -291,10 +379,54 @@ const NekretninarForm = ({
       napomena: unit.napomena?.trim() || null,
     }));
 
+    // Validate parkings
+    const validParkings = parkings.filter(
+      (p) =>
+        (p.internal_id && p.internal_id.trim()) ||
+        (p.floor && p.floor.trim()) ||
+        (p.naziv && p.naziv.trim()),
+    );
+
+    const invalidParkings = validParkings.filter(
+      (p) =>
+        !p.internal_id ||
+        !p.internal_id.trim() ||
+        !p.floor ||
+        !p.floor.trim(),
+    );
+
+    if (invalidParkings.length > 0) {
+      toast.error("Sva parkirna mjesta moraju imati oznaku i etažu.");
+      return;
+    }
+
+    const preparedParkings = validParkings.map((p) => ({
+      id: p.isExisting ? p.localId : undefined,
+      internal_id: p.internal_id.trim(),
+      floor: p.floor.trim(),
+      naziv: p.naziv?.trim() || null,
+      status: p.status || "dostupno",
+      osnovna_zakupnina: p.osnovna_zakupnina
+        ? parseNumericValue(p.osnovna_zakupnina)
+        : null,
+      vehicle_plates: Array.isArray(p.vehicle_plates)
+        ? p.vehicle_plates.filter((plate) => plate && plate.trim())
+        : [],
+      notes: p.notes?.trim() || null,
+    }));
+
+    // If user added at least one parking, force has_parking to true so the
+    // detail page Parking tab actually shows up.
+    if (preparedParkings.length > 0 && !data.has_parking) {
+      data.has_parking = true;
+    }
+
     await onSubmit({
       nekretnina: data,
       units: preparedUnits,
       deletedUnitIds,
+      parkings: preparedParkings,
+      deletedParkingIds,
       imageFile: formData.selectedImage,
     });
   };
@@ -307,12 +439,13 @@ const NekretninarForm = ({
         data-testid="nekretnina-form"
       >
         <Tabs defaultValue="osnovni" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 md:grid-cols-5">
+          <TabsList className="grid w-full grid-cols-3 md:grid-cols-6">
             <TabsTrigger value="osnovni">Osnovni podaci</TabsTrigger>
             <TabsTrigger value="financije">Financije</TabsTrigger>
             <TabsTrigger value="odrzavanje">Održavanje</TabsTrigger>
             <TabsTrigger value="rizici">Rizici</TabsTrigger>
             <TabsTrigger value="units">Jedinice</TabsTrigger>
+            <TabsTrigger value="parking">Parking</TabsTrigger>
           </TabsList>
 
           <TabsContent value="osnovni" className="space-y-4">
@@ -343,6 +476,9 @@ const NekretninarForm = ({
                   <SelectContent>
                     <SelectItem value="poslovna_zgrada">
                       Poslovna zgrada
+                    </SelectItem>
+                    <SelectItem value="stambeni_objekt">
+                      Stambeni objekt
                     </SelectItem>
                     <SelectItem value="stan">Stan</SelectItem>
                     <SelectItem value="zemljiste">Zemljište</SelectItem>
@@ -426,7 +562,7 @@ const NekretninarForm = ({
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="povrsina">Površina (m²) *</Label>
+                <Label htmlFor="povrsina">Ukupna površina (m²) *</Label>
                 <Input
                   id="povrsina"
                   type="number"
@@ -452,6 +588,43 @@ const NekretninarForm = ({
                     })
                   }
                   data-testid="nekretnina-godina-input"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="povrsina_objekta">Površina objekta (m²)</Label>
+                <Input
+                  id="povrsina_objekta"
+                  type="number"
+                  step="0.01"
+                  value={formData.povrsina_objekta}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      povrsina_objekta: e.target.value,
+                    })
+                  }
+                  data-testid="nekretnina-povrsina-objekta-input"
+                />
+              </div>
+              <div>
+                <Label htmlFor="povrsina_zemljista">
+                  Površina zemljišta (m²)
+                </Label>
+                <Input
+                  id="povrsina_zemljista"
+                  type="number"
+                  step="0.01"
+                  value={formData.povrsina_zemljista}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      povrsina_zemljista: e.target.value,
+                    })
+                  }
+                  data-testid="nekretnina-povrsina-zemljista-input"
                 />
               </div>
             </div>
@@ -892,10 +1065,12 @@ const NekretninarForm = ({
             ) : (
               <div className="space-y-3">
                 {units.map((unit, index) => {
+                  const unitMatchId = unit.id || unit.localId;
                   const activeContract = activeContracts.find(
                     (c) =>
-                      c.property_unit_id === unit.localId ||
-                      c.property_unit_id === unit.id,
+                      c.property_unit_id === unitMatchId ||
+                      (Array.isArray(c.property_unit_ids) &&
+                        c.property_unit_ids.includes(unitMatchId)),
                   );
                   const tenantName = activeContract
                     ? activeContract.zakupnik_naziv || "Nepoznat zakupnik"
@@ -1098,6 +1273,209 @@ const NekretninarForm = ({
               </div>
             )}
           </TabsContent>
+
+          <TabsContent value="parking" className="space-y-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h4 className="text-sm font-semibold text-foreground">
+                  Parkirna mjesta
+                </h4>
+                <p className="text-xs text-muted-foreground">
+                  Garažna i vanjska parkirna mjesta. Status se automatski
+                  postavlja "iznajmljeno" kad ih vežeš na ugovor.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleAddParking}
+              >
+                <Plus className="w-4 h-4 mr-2" /> Dodaj mjesto
+              </Button>
+            </div>
+
+            {parkings.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
+                Još niste dodali nijedno parkirno mjesto. Kliknite na gumb iznad
+                za dodavanje.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {parkings.map((p) => (
+                  <div
+                    key={p.localId}
+                    className="space-y-3 rounded-xl border border-border/60 bg-white/80 p-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">
+                          {p.internal_id || "Novo mjesto"}
+                          {p.floor ? (
+                            <span className="text-muted-foreground font-normal">
+                              {" "}
+                              · etaža {p.floor}
+                            </span>
+                          ) : null}
+                        </p>
+                        {p.naziv && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {p.naziv}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() =>
+                          setParkingToDelete({
+                            localId: p.localId,
+                            isExisting: p.isExisting,
+                            internal_id: p.internal_id,
+                          })
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div>
+                        <Label>Oznaka *</Label>
+                        <Input
+                          value={p.internal_id}
+                          onChange={(e) =>
+                            handleUpdateParking(
+                              p.localId,
+                              "internal_id",
+                              e.target.value,
+                            )
+                          }
+                          placeholder="npr. PM-12"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <Label>Etaža *</Label>
+                        <Input
+                          value={p.floor}
+                          onChange={(e) =>
+                            handleUpdateParking(
+                              p.localId,
+                              "floor",
+                              e.target.value,
+                            )
+                          }
+                          placeholder="npr. -2"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <Label>Naziv (opcionalno)</Label>
+                        <Input
+                          value={p.naziv}
+                          onChange={(e) =>
+                            handleUpdateParking(
+                              p.localId,
+                              "naziv",
+                              e.target.value,
+                            )
+                          }
+                          placeholder="npr. Veliki SUV ulaz B"
+                        />
+                      </div>
+                      <div>
+                        <Label>Status</Label>
+                        <Select
+                          value={p.status}
+                          onValueChange={(value) =>
+                            handleUpdateParking(p.localId, "status", value)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {parkingStatusOptions.map((option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                                disabled={option.value === "iznajmljeno"}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          Status "Iznajmljeno" postavlja se isključivo kad se
+                          mjesto veže na aktivan ugovor.
+                        </p>
+                      </div>
+                      <div>
+                        <Label>Mjesečna zakupnina (€)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={p.osnovna_zakupnina}
+                          onChange={(e) =>
+                            handleUpdateParking(
+                              p.localId,
+                              "osnovna_zakupnina",
+                              e.target.value,
+                            )
+                          }
+                          placeholder="npr. 50"
+                        />
+                      </div>
+                      <div>
+                        <Label>Registracije (max 2)</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            value={p.vehicle_plates?.[0] || ""}
+                            onChange={(e) =>
+                              handleUpdateParkingPlate(
+                                p.localId,
+                                0,
+                                e.target.value,
+                              )
+                            }
+                            placeholder="Vozilo 1"
+                          />
+                          <Input
+                            value={p.vehicle_plates?.[1] || ""}
+                            onChange={(e) =>
+                              handleUpdateParkingPlate(
+                                p.localId,
+                                1,
+                                e.target.value,
+                              )
+                            }
+                            placeholder="Vozilo 2"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Napomena</Label>
+                      <Textarea
+                        value={p.notes || ""}
+                        onChange={(e) =>
+                          handleUpdateParking(
+                            p.localId,
+                            "notes",
+                            e.target.value,
+                          )
+                        }
+                        placeholder="npr. uz dizalo, dimenzija 2.5×5m"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
         </Tabs>
 
         <div className="flex space-x-2 pt-4">
@@ -1152,6 +1530,46 @@ const NekretninarForm = ({
                   );
                 }
                 setUnitToDelete(null);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Ukloni
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!parkingToDelete}
+        onOpenChange={(open) => !open && setParkingToDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Ukloni parkirno mjesto?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Jeste li sigurni da želite ukloniti parkirno mjesto
+              {parkingToDelete?.internal_id ? (
+                <>
+                  {" "}
+                  <span className="font-medium text-foreground">
+                    {parkingToDelete.internal_id}
+                  </span>
+                </>
+              ) : null}
+              ? Ova radnja se ne može poništiti.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Odustani</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (parkingToDelete) {
+                  handleRemoveParking(
+                    parkingToDelete.localId,
+                    parkingToDelete.isExisting,
+                  );
+                }
+                setParkingToDelete(null);
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

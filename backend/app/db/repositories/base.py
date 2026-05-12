@@ -10,6 +10,7 @@ from typing import Any, Dict, Generic, List, Optional, Tuple, Type, TypeVar
 from sqlalchemy import Select, and_, asc, desc, func, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.db import dashboard_cache
 from app.db.base import Base
 from app.db.tenant import CURRENT_TENANT_ID
 
@@ -29,6 +30,19 @@ class BaseRepository(Generic[T]):
 
     model: Type[T]
     tenant_scoped: bool = False  # Override in subclass for tenant-scoped tables
+
+    # Set to True on repos whose writes change a dashboard counter
+    # (properties, units, contracts, maintenance, bills, tenants). When
+    # True, every successful create/update/delete drops the current
+    # tenant's dashboard cache so the next page load sees the new data
+    # instead of waiting out the 30s TTL.
+    invalidates_dashboard_cache: bool = False
+
+    def _maybe_invalidate_dashboard(self) -> None:
+        """Drop the dashboard cache for the active tenant if this repo
+        feeds the dashboard. Called from write methods after commit."""
+        if self.invalidates_dashboard_cache:
+            dashboard_cache.invalidate_current_tenant()
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -244,6 +258,12 @@ class BaseRepository(Generic[T]):
         """Return ``True`` if at least one record matches the filters."""
         return await self.find_one(**filters) is not None
 
+    # Hard upper bound on `find_all` — protects cron workers from OOM
+    # when a single tenant grows past 10k rows in a table. If the cap is
+    # hit we log a warning so the operator notices before the data shape
+    # actually changes (e.g. dashboard counters silently lose rows).
+    FIND_ALL_HARD_CAP = 10_000
+
     async def find_all(
         self,
         filters: Optional[Dict[str, Any]] = None,
@@ -252,9 +272,11 @@ class BaseRepository(Generic[T]):
         order_dir: str = "desc",
         extra_conditions: Optional[list] = None,
     ) -> List[T]:
-        """Return *all* matching records (no pagination).
+        """Return matching records up to a hard cap (`FIND_ALL_HARD_CAP`).
 
-        Useful for dashboard aggregations and bulk operations.
+        Used by dashboards / cron / bulk operations. The cap means a tenant
+        with 50k bills no longer OOMs a worker on the daily cron — they
+        just lose anything past 10k, which is logged as a warning.
         """
         async with self._session_factory() as session:
             stmt = select(self.model)
@@ -282,8 +304,22 @@ class BaseRepository(Generic[T]):
                     stmt = stmt.order_by(desc(self.model.created_at))
             elif hasattr(self.model, "created_at"):
                 stmt = stmt.order_by(desc(self.model.created_at))
+
+            # Fetch cap+1 so we can detect the overflow without paying for
+            # the full table on huge tenants.
+            stmt = stmt.limit(self.FIND_ALL_HARD_CAP + 1)
             result = await session.execute(stmt)
-            return list(result.scalars().all())
+            rows = list(result.scalars().all())
+            if len(rows) > self.FIND_ALL_HARD_CAP:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "find_all on %s hit hard cap %d — truncating; consider "
+                    "switching this call to find_many with pagination.",
+                    self.model.__tablename__,
+                    self.FIND_ALL_HARD_CAP,
+                )
+                rows = rows[: self.FIND_ALL_HARD_CAP]
+            return rows
 
     # ------------------------------------------------------------------
     # Write operations
@@ -303,6 +339,7 @@ class BaseRepository(Generic[T]):
             else:
                 await s.commit()
                 await s.refresh(instance)
+            self._maybe_invalidate_dashboard()
             return instance
 
     async def update_by_id(
@@ -325,6 +362,7 @@ class BaseRepository(Generic[T]):
             else:
                 await s.commit()
                 await s.refresh(instance)
+            self._maybe_invalidate_dashboard()
             return instance
 
     async def update_many(
@@ -357,6 +395,8 @@ class BaseRepository(Generic[T]):
             stmt = stmt.values(**data)
             result = await session.execute(stmt)
             await session.commit()
+            if result.rowcount:
+                self._maybe_invalidate_dashboard()
             return result.rowcount
 
     async def delete_by_id(
@@ -375,6 +415,7 @@ class BaseRepository(Generic[T]):
                 await s.flush()
             else:
                 await s.commit()
+            self._maybe_invalidate_dashboard()
             return True
 
     async def delete_many(
@@ -411,6 +452,7 @@ class BaseRepository(Generic[T]):
                     await s.flush()
                 else:
                     await s.commit()
+                self._maybe_invalidate_dashboard()
             return len(rows)
 
     # ------------------------------------------------------------------

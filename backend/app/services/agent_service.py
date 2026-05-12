@@ -15,6 +15,7 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import get_settings
+from app.core.validators import validate_iban, validate_oib
 from app.db.repositories.instance import (
     dobavljaci,
     maintenance_tasks,
@@ -25,6 +26,7 @@ from app.db.repositories.instance import (
     ugovori,
     zakupnici,
 )
+from app.models.domain import PropertyUnitStatus, StatusUgovora
 from app.models.tables import RacuniRow
 
 logger = logging.getLogger(__name__)
@@ -310,6 +312,42 @@ WRITE_TOOLS = [
 
 ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
 WRITE_TOOL_NAMES = {t["name"] for t in WRITE_TOOLS}
+
+# Each write tool requires a specific scope. A user talking to the agent
+# without the scope simply won't see the tool in the list sent to Claude —
+# matches the REST API's permission model so the agent can't be used as an
+# escalation path.
+WRITE_TOOL_REQUIRED_SCOPES: Dict[str, str] = {
+    "create_zakupnik": "tenants:create",
+    "update_zakupnik": "tenants:update",
+    "create_maintenance_task": "maintenance:create",
+    "update_maintenance_task": "maintenance:update",
+    "update_ugovor_status": "leases:update",
+}
+
+
+def _user_has_scope(user_scopes: List[str], required: str) -> bool:
+    """Same resolution rules as core.roles.scope_matches, duplicated here
+    to avoid a circular import chain."""
+    if "*" in user_scopes:
+        return True
+    if required in user_scopes:
+        return True
+    if ":" not in required:
+        return False
+    resource, _ = required.split(":", 1)
+    return f"{resource}:*" in user_scopes
+
+
+def tools_for_user(user_scopes: Optional[List[str]]) -> List[Dict[str, Any]]:
+    """Return the tool list the agent is allowed to offer to this user."""
+    scopes = user_scopes or []
+    allowed: List[Dict[str, Any]] = list(READ_TOOLS)
+    for tool in WRITE_TOOLS:
+        required = WRITE_TOOL_REQUIRED_SCOPES.get(tool["name"])
+        if required is None or _user_has_scope(scopes, required):
+            allowed.append(tool)
+    return allowed
 
 
 # ---------------------------------------------------------------------------
@@ -616,9 +654,30 @@ async def _execute_read(name: str, inp: Dict[str, Any]) -> Any:
 
 
 async def execute_write_tool(
-    name: str, tool_input: Dict[str, Any], user_id: str
+    name: str,
+    tool_input: Dict[str, Any],
+    user_id: str,
+    user_scopes: Optional[List[str]] = None,
 ) -> str:
-    """Execute a confirmed WRITE tool. Returns JSON result string."""
+    """Execute a confirmed WRITE tool. Returns JSON result string.
+
+    A second scope check runs here even though the tool list was already
+    filtered upstream — the confirm endpoint accepts a tool name from the
+    client, and we refuse to execute anything the user doesn't have scope
+    for regardless of how it arrived.
+    """
+    if user_scopes is not None:
+        required = WRITE_TOOL_REQUIRED_SCOPES.get(name)
+        if required and not _user_has_scope(user_scopes, required):
+            return json.dumps(
+                {
+                    "error": (
+                        f"Nemate ovlasti za alat '{name}' "
+                        f"(potreban scope: {required})."
+                    )
+                },
+                ensure_ascii=False,
+            )
     try:
         result = await _execute_write(name, tool_input, user_id)
         return json.dumps(result, ensure_ascii=False, default=str)
@@ -627,14 +686,39 @@ async def execute_write_tool(
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_PRIORITET_ALLOWED = {"nisko", "srednje", "visoko", "kriticno"}
+_TASK_STATUS_ALLOWED = {
+    "novi", "u_tijeku", "ceka_dobavljaca", "zavrseno", "arhivirano", "planiran",
+}
+
+
+def _validate_email(value: Optional[str]) -> Optional[str]:
+    if value is None or value == "":
+        return None
+    value = str(value).strip()
+    if not _EMAIL_RE.match(value):
+        raise ValueError(f"E-mail adresa '{value}' nije ispravnog formata.")
+    return value
+
+
 async def _execute_write(name: str, inp: Dict[str, Any], user_id: str) -> Any:
+    """Execute a write tool with the same validation gates that the REST API
+    applies. The agent cannot be allowed to bypass OIB/IBAN checks, status
+    transitions, or approval rules just because the call came from a chatbot.
+    """
     if name == "create_zakupnik":
+        try:
+            email = _validate_email(inp.get("kontakt_email"))
+            oib = validate_oib(inp.get("oib")) if inp.get("oib") else None
+        except ValueError as e:
+            return {"error": str(e)}
         row = await zakupnici.create(
             {
                 "ime_prezime": inp["ime_prezime"],
-                "kontakt_email": inp.get("kontakt_email", ""),
+                "kontakt_email": email or "",
                 "kontakt_telefon": inp.get("kontakt_telefon", ""),
-                "oib": inp.get("oib"),
+                "oib": oib,
                 "created_by": user_id,
             }
         )
@@ -643,18 +727,45 @@ async def _execute_write(name: str, inp: Dict[str, Any], user_id: str) -> Any:
     elif name == "update_zakupnik":
         zid = inp.pop("zakupnik_id")
         update_data = {k: v for k, v in inp.items() if v is not None}
+        try:
+            if "kontakt_email" in update_data:
+                update_data["kontakt_email"] = _validate_email(
+                    update_data["kontakt_email"]
+                ) or ""
+            if "oib" in update_data and update_data["oib"]:
+                update_data["oib"] = validate_oib(update_data["oib"])
+            if "iban" in update_data and update_data["iban"]:
+                update_data["iban"] = validate_iban(update_data["iban"])
+        except ValueError as e:
+            return {"error": str(e)}
         row = await zakupnici.update_by_id(zid, update_data)
         if not row:
             return {"error": "Zakupnik nije pronađen"}
         return {"success": True, "id": zid, "message": "Zakupnik ažuriran."}
 
     elif name == "create_maintenance_task":
+        prioritet = inp.get("prioritet", "srednje")
+        if prioritet not in _PRIORITET_ALLOWED:
+            return {
+                "error": (
+                    f"Prioritet '{prioritet}' nije dozvoljen. "
+                    f"Dozvoljeni: {sorted(_PRIORITET_ALLOWED)}"
+                )
+            }
+        status = inp.get("status", "novi")
+        if status not in _TASK_STATUS_ALLOWED:
+            return {
+                "error": (
+                    f"Status '{status}' nije dozvoljen. "
+                    f"Dozvoljeni: {sorted(_TASK_STATUS_ALLOWED)}"
+                )
+            }
         data = {
             "naziv": inp["naziv"],
             "opis": inp.get("opis", ""),
             "nekretnina_id": inp.get("nekretnina_id"),
-            "prioritet": inp.get("prioritet", "srednje"),
-            "status": inp.get("status", "novi"),
+            "prioritet": prioritet,
+            "status": status,
             "created_by": user_id,
         }
         row = await maintenance_tasks.create(data)
@@ -663,17 +774,89 @@ async def _execute_write(name: str, inp: Dict[str, Any], user_id: str) -> Any:
     elif name == "update_maintenance_task":
         tid = inp.pop("task_id")
         update_data = {k: v for k, v in inp.items() if v is not None}
+        if "status" in update_data and update_data["status"] not in _TASK_STATUS_ALLOWED:
+            return {
+                "error": (
+                    f"Status '{update_data['status']}' nije dozvoljen. "
+                    f"Dozvoljeni: {sorted(_TASK_STATUS_ALLOWED)}"
+                )
+            }
+        if "prioritet" in update_data and update_data["prioritet"] not in _PRIORITET_ALLOWED:
+            return {
+                "error": (
+                    f"Prioritet '{update_data['prioritet']}' nije dozvoljen. "
+                    f"Dozvoljeni: {sorted(_PRIORITET_ALLOWED)}"
+                )
+            }
         row = await maintenance_tasks.update_by_id(tid, update_data)
         if not row:
             return {"error": "Nalog nije pronađen"}
         return {"success": True, "id": tid, "message": "Nalog ažuriran."}
 
     elif name == "update_ugovor_status":
+        # Delegate to the same transition table the REST endpoint uses so
+        # the agent cannot resurrect ISTEKAO/ARHIVIRANO → AKTIVNO (B3) or
+        # sidestep approval gates.
+        from app.api.v1.endpoints.contracts import VALID_STATUS_TRANSITIONS
+
         uid = inp["ugovor_id"]
-        row = await ugovori.update_by_id(uid, {"status": inp["novi_status"]})
-        if not row:
+        novi = inp["novi_status"]
+        try:
+            novi_enum = StatusUgovora(novi)
+        except ValueError:
+            return {"error": f"Status '{novi}' ne postoji."}
+
+        existing = await ugovori.get_by_id(uid)
+        if not existing:
             return {"error": "Ugovor nije pronađen"}
-        return {"success": True, "id": uid, "message": f"Status ugovora promijenjen u '{inp['novi_status']}'."}
+
+        # Only approved (or legacy) contracts may have their status edited
+        from app.models.domain import ApprovalStatus
+        approval = existing.approval_status or ApprovalStatus.APPROVED.value
+        if approval not in (ApprovalStatus.APPROVED.value, None):
+            return {
+                "error": (
+                    "Promjena statusa dozvoljena je samo za odobrene ugovore."
+                )
+            }
+
+        current_str = existing.status or StatusUgovora.AKTIVNO.value
+        try:
+            current_enum = StatusUgovora(current_str)
+        except ValueError:
+            current_enum = StatusUgovora.AKTIVNO
+        allowed = VALID_STATUS_TRANSITIONS.get(current_enum, set())
+        if novi_enum != current_enum and novi_enum not in allowed:
+            return {
+                "error": (
+                    f"Nije moguća promjena statusa iz "
+                    f"'{current_enum.value}' u '{novi_enum.value}'."
+                )
+            }
+
+        await ugovori.update_by_id(uid, {"status": novi_enum.value})
+
+        # Mirror REST behaviour: sync linked unit status
+        if existing.property_unit_id:
+            unit_id = existing.property_unit_id
+            if novi_enum == StatusUgovora.AKTIVNO:
+                await property_units.update_by_id(
+                    unit_id, {"status": PropertyUnitStatus.IZNAJMLJENO}
+                )
+            elif novi_enum in (
+                StatusUgovora.RASKINUTO,
+                StatusUgovora.ARHIVIRANO,
+                StatusUgovora.ISTEKAO,
+            ):
+                await property_units.update_by_id(
+                    unit_id, {"status": PropertyUnitStatus.DOSTUPNO}
+                )
+
+        return {
+            "success": True,
+            "id": uid,
+            "message": f"Status ugovora promijenjen u '{novi_enum.value}'.",
+        }
 
     return {"error": f"Nepoznat write alat: {name}"}
 
@@ -712,8 +895,16 @@ def _log_usage(response, label: str = "agent") -> None:
 async def run_agent_turn(
     history: List[Dict[str, Any]],
     user_message: str,
+    user_scopes: Optional[List[str]] = None,
 ) -> Tuple[str, Optional[Dict[str, Any]]]:
     """Run one agent turn.
+
+    Args:
+        history: prior chat messages
+        user_message: newest user turn
+        user_scopes: the caller's scope list — used to filter write tools.
+            ``None`` means "give the agent full write access" and should only
+            be used for trusted internal callers (tests, scheduler).
 
     Returns:
         (assistant_text, pending_action)
@@ -728,6 +919,8 @@ async def run_agent_turn(
     messages = list(history[-MAX_CONTEXT_MESSAGES:])
     messages.append({"role": "user", "content": user_message})
 
+    tools = ALL_TOOLS if user_scopes is None else tools_for_user(user_scopes)
+
     t0 = time.monotonic()
 
     for iteration in range(MAX_TOOL_ITERATIONS):
@@ -735,7 +928,7 @@ async def run_agent_turn(
             model=model,
             max_tokens=8192,
             system=SYSTEM_PROMPT,
-            tools=ALL_TOOLS,
+            tools=tools,
             messages=messages,
         )
         _log_usage(response, f"agent-iter-{iteration}")

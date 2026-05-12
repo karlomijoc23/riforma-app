@@ -52,12 +52,17 @@ import {
 import { differenceInMonths } from "date-fns";
 import { formatDate } from "../../shared/formatters";
 import { getUnitDisplayName } from "../../shared/units";
+import { getParkingDisplayName } from "../../shared/parking";
+import SearchableSelect from "../../components/SearchableSelect";
+import MultiSelectList from "../../components/MultiSelectList";
 
 const emptyForm = {
   interna_oznaka: "",
   nekretnina_id: "",
   zakupnik_id: "",
   property_unit_id: "",
+  property_unit_ids: [],
+  parking_ids: [],
   datum_potpisivanja: "",
   datum_pocetka: "",
   datum_zavrsetka: "",
@@ -86,6 +91,7 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
   const [nekretnine, setNekretnine] = useState([]);
   const [zakupnici, setZakupnici] = useState([]);
   const [units, setUnits] = useState([]);
+  const [parkings, setParkings] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
@@ -166,9 +172,23 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
 
   useEffect(() => {
     if (ugovor) {
+      // Backend returns the full unit set in `property_unit_ids`. Fall back
+      // to the legacy single `property_unit_id` if the field is missing
+      // (older data, or pending refresh after edit).
+      const initialUnitIds =
+        Array.isArray(ugovor.property_unit_ids) && ugovor.property_unit_ids.length
+          ? ugovor.property_unit_ids
+          : ugovor.property_unit_id
+            ? [ugovor.property_unit_id]
+            : [];
+
       setFormData({
         ...emptyForm,
         ...ugovor,
+        property_unit_ids: initialUnitIds,
+        parking_ids: Array.isArray(ugovor.parking_ids)
+          ? ugovor.parking_ids
+          : [],
         // Ensure dates are in YYYY-MM-DD format for input type="date"
         datum_potpisivanja: ugovor.datum_potpisivanja
           ? ugovor.datum_potpisivanja.split("T")[0]
@@ -182,6 +202,7 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
       });
       if (ugovor.nekretnina_id) {
         fetchUnits(ugovor.nekretnina_id);
+        fetchParkings(ugovor.nekretnina_id);
       }
       fetchProtocolDocuments(ugovor.id);
     }
@@ -195,8 +216,13 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
           ...prev,
           nekretnina_id: prefill.nekretnina_id,
           property_unit_id: prefill.property_unit_id || "",
+          property_unit_ids: prefill.property_unit_id
+            ? [prefill.property_unit_id]
+            : [],
+          parking_ids: prefill.parking_id ? [prefill.parking_id] : [],
         }));
         fetchUnits(prefill.nekretnina_id);
+        fetchParkings(prefill.nekretnina_id);
       }
     }
   }, [prefill, ugovor, loadingData]);
@@ -221,6 +247,15 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
     }
   };
 
+  const fetchParkings = async (propertyId) => {
+    try {
+      const res = await api.getParking(propertyId);
+      setParkings(res.data || []);
+    } catch (error) {
+      console.error("Error fetching parking spaces:", error);
+    }
+  };
+
   const fetchProtocolDocuments = async (contractId) => {
     try {
       const res = await api.getDokumentiUgovora(contractId);
@@ -238,8 +273,40 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
     if (key === "nekretnina_id") {
       fetchUnits(value);
-      setFormData((prev) => ({ ...prev, property_unit_id: "" }));
+      fetchParkings(value);
+      // Switching property invalidates the previous unit + parking selection.
+      setFormData((prev) => ({
+        ...prev,
+        property_unit_id: "",
+        property_unit_ids: [],
+        parking_ids: [],
+      }));
     }
+  };
+
+  const toggleUnit = (unitId) => {
+    setFormData((prev) => {
+      const current = prev.property_unit_ids || [];
+      const next = current.includes(unitId)
+        ? current.filter((id) => id !== unitId)
+        : [...current, unitId];
+      return {
+        ...prev,
+        property_unit_ids: next,
+        // First selected unit becomes the legacy "primary" pointer.
+        property_unit_id: next[0] || "",
+      };
+    });
+  };
+
+  const toggleParking = (parkingId) => {
+    setFormData((prev) => {
+      const current = prev.parking_ids || [];
+      const next = current.includes(parkingId)
+        ? current.filter((id) => id !== parkingId)
+        : [...current, parkingId];
+      return { ...prev, parking_ids: next };
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -275,6 +342,10 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
         garancija: parseFloat(formData.garancija) || 0,
         // Handle empty strings for optional fields
         property_unit_id: formData.property_unit_id || null,
+        // Multi-unit: backend takes the full set; the array is the source
+        // of truth and `property_unit_id` is just the primary pointer.
+        property_unit_ids: formData.property_unit_ids || [],
+        parking_ids: formData.parking_ids || [],
         datum_potpisivanja: formData.datum_potpisivanja || null,
       };
 
@@ -561,88 +632,160 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
           <Label htmlFor="nekretnina_id">
             Nekretnina <span className="text-destructive">*</span>
           </Label>
-          <Select
-            value={formData.nekretnina_id}
-            onValueChange={(val) => handleChange("nekretnina_id", val)}
-            required
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Odaberi nekretninu" />
-            </SelectTrigger>
-            <SelectContent>
-              {nekretnine.length === 0 ? (
-                <div className="px-2 py-3 text-center">
-                  <Building className="mx-auto h-8 w-8 text-muted-foreground/40 mb-2" />
-                  <p className="text-sm text-muted-foreground">
-                    Nema nekretnina u sustavu
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Kreirajte nekretninu u sekciji Nekretnine
-                  </p>
-                </div>
-              ) : (
-                nekretnine.map((n) => (
-                  <SelectItem key={n.id} value={n.id}>
-                    {n.naziv}
-                    {n.adresa ? (
-                      <span className="text-muted-foreground ml-1">
-                        — {n.adresa}
-                      </span>
-                    ) : null}
-                  </SelectItem>
-                ))
-              )}
-            </SelectContent>
-          </Select>
+          {nekretnine.length === 0 ? (
+            <div className="rounded-md border border-dashed px-3 py-6 text-center">
+              <Building className="mx-auto h-8 w-8 text-muted-foreground/40 mb-2" />
+              <p className="text-sm text-muted-foreground">
+                Nema nekretnina u sustavu
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Kreirajte nekretninu u sekciji Nekretnine
+              </p>
+            </div>
+          ) : (
+            <SearchableSelect
+              id="nekretnina_id"
+              value={formData.nekretnina_id}
+              onChange={(val) => handleChange("nekretnina_id", val)}
+              required
+              placeholder="Odaberi nekretninu"
+              searchPlaceholder="Pretraži nekretnine…"
+              emptyMessage="Nema rezultata."
+              items={nekretnine.map((n) => ({
+                value: n.id,
+                label: n.naziv,
+                hint: n.adresa || undefined,
+              }))}
+            />
+          )}
         </div>
         <div className="space-y-2">
-          <Label htmlFor="property_unit_id">
-            Jedinica
+          <Label>
+            Jedinice
             {units.length > 0 && (
               <span className="text-xs text-muted-foreground ml-1">
-                ({units.filter((u) => u.status === "dostupno").length} dostupno)
+                ({units.filter((u) => u.status === "dostupno").length} slobodnih
+                — možeš odabrati više)
               </span>
             )}
           </Label>
-          <Select
-            value={formData.property_unit_id}
-            onValueChange={(val) =>
-              handleChange("property_unit_id", val === "_none" ? "" : val)
-            }
-            disabled={!formData.nekretnina_id || units.length === 0}
-          >
-            <SelectTrigger>
-              <SelectValue
-                placeholder={
-                  units.length === 0
-                    ? "Nema jedinica za ovu nekretninu"
-                    : "Odaberi jedinicu"
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="_none">— Bez jedinice —</SelectItem>
-              {units.map((u) => {
-                const isAvailable =
-                  u.status === "dostupno" ||
+          {!formData.nekretnina_id || units.length === 0 ? (
+            <div className="rounded-md border border-dashed px-3 py-3 text-sm text-muted-foreground">
+              {units.length === 0
+                ? "Nema jedinica za ovu nekretninu — ugovor će se odnositi na cijelu nekretninu."
+                : "Prvo odaberi nekretninu."}
+            </div>
+          ) : (
+            <MultiSelectList
+              items={units}
+              selectedIds={formData.property_unit_ids || []}
+              onToggle={toggleUnit}
+              getLabel={(u) => getUnitDisplayName(u, { showArea: false })}
+              getSearchText={(u) =>
+                `${u.oznaka || ""} ${u.naziv || ""} ${u.kat || ""}`
+              }
+              isDisabled={(u) => {
+                const ownedHere =
+                  ugovor?.property_unit_ids?.includes?.(u.id) ||
                   u.id === ugovor?.property_unit_id ||
                   u.id === prefill?.property_unit_id;
-                return (
-                  <SelectItem
-                    key={u.id}
-                    value={u.id}
-                    disabled={!isAvailable && u.status === "iznajmljeno"}
-                  >
-                    {getUnitDisplayName(u, { showArea: true })}
-                    {u.status === "iznajmljeno" &&
-                    u.id !== ugovor?.property_unit_id
-                      ? " (zauzeto)"
-                      : ""}
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
+                return u.status === "iznajmljeno" && !ownedHere;
+              }}
+              disabledHint={() => "Jedinica je zauzeta drugim ugovorom."}
+              renderPrimary={(u) => getUnitDisplayName(u, { showArea: true })}
+              filters={[
+                { key: "all", label: "Sve" },
+                { key: "free", label: "Slobodne" },
+                { key: "selected", label: "Odabrane" },
+              ]}
+              filterPredicate={(u, key) => {
+                if (key === "free") return u.status === "dostupno";
+                if (key === "selected")
+                  return (formData.property_unit_ids || []).includes(u.id);
+                return true;
+              }}
+              placeholder="Pretraži jedinice (oznaka, naziv, kat)…"
+              emptyMessage="Nema jedinica za zadane filtere."
+            />
+          )}
+          {(formData.property_unit_ids || []).length > 1 && (
+            <p className="text-xs text-muted-foreground">
+              Odabrano: {formData.property_unit_ids.length} jedinica. Prva u
+              redu je primarna i pojavljuje se na ispisu ugovora kao referenca.
+            </p>
+          )}
+        </div>
+        <div className="space-y-2 md:col-span-2">
+          <Label>
+            Parkirna mjesta
+            {parkings.length > 0 && (
+              <span className="text-xs text-muted-foreground ml-1">
+                ({parkings.filter((p) => p.status === "dostupno").length}{" "}
+                slobodnih — možeš odabrati više)
+              </span>
+            )}
+          </Label>
+          {!formData.nekretnina_id || parkings.length === 0 ? (
+            <div className="rounded-md border border-dashed px-3 py-3 text-sm text-muted-foreground">
+              {!formData.nekretnina_id
+                ? "Prvo odaberi nekretninu."
+                : "Nema parkirnih mjesta za ovu nekretninu."}
+            </div>
+          ) : (
+            <MultiSelectList
+              items={parkings}
+              selectedIds={formData.parking_ids || []}
+              onToggle={toggleParking}
+              getLabel={(p) => getParkingDisplayName(p)}
+              getSearchText={(p) =>
+                `${p.internal_id || ""} ${p.naziv || ""} ${p.floor || ""} ${
+                  Array.isArray(p.vehicle_plates)
+                    ? p.vehicle_plates.join(" ")
+                    : ""
+                }`
+              }
+              isDisabled={(p) => {
+                const ownedHere =
+                  ugovor?.parking_ids?.includes?.(p.id) ||
+                  prefill?.parking_id === p.id;
+                return p.status === "iznajmljeno" && !ownedHere;
+              }}
+              disabledHint={() => "Parking je zauzet drugim ugovorom."}
+              renderPrimary={(p) => getParkingDisplayName(p)}
+              renderSecondary={(p) =>
+                p.osnovna_zakupnina != null
+                  ? `${Number(p.osnovna_zakupnina).toLocaleString("hr-HR")} € / mj.`
+                  : null
+              }
+              filters={[
+                { key: "all", label: "Sve" },
+                { key: "free", label: "Slobodno" },
+                { key: "selected", label: "Odabrano" },
+                ...Array.from(
+                  new Set(
+                    parkings
+                      .map((p) => p.floor)
+                      .filter((f) => f !== undefined && f !== null && f !== ""),
+                  ),
+                )
+                  .sort()
+                  .map((floor) => ({
+                    key: `floor:${floor}`,
+                    label: `Etaža ${floor}`,
+                  })),
+              ]}
+              filterPredicate={(p, key) => {
+                if (key === "free") return p.status === "dostupno";
+                if (key === "selected")
+                  return (formData.parking_ids || []).includes(p.id);
+                if (key.startsWith("floor:"))
+                  return p.floor === key.slice("floor:".length);
+                return true;
+              }}
+              placeholder="Pretraži parking (oznaka, etaža, registracija)…"
+              emptyMessage="Nema parkirnih mjesta za zadane filtere."
+            />
+          )}
         </div>
       </div>
 
@@ -652,47 +795,42 @@ const UgovorForm = ({ ugovor, prefill, onSuccess, onCancel }) => {
         </Label>
         <div className="flex gap-2">
           <div className="flex-1">
-            <Select
-              value={formData.zakupnik_id}
-              onValueChange={(val) => handleChange("zakupnik_id", val)}
-              required
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Odaberi zakupnika" />
-              </SelectTrigger>
-              <SelectContent>
-                {zakupnici.length === 0 ? (
-                  <div className="px-2 py-3 text-center">
-                    <UserPlus className="mx-auto h-8 w-8 text-muted-foreground/40 mb-2" />
-                    <p className="text-sm text-muted-foreground">
-                      Nema zakupnika u sustavu
-                    </p>
-                    <Button
-                      type="button"
-                      variant="link"
-                      size="sm"
-                      className="mt-1 text-primary"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setShowNewZakupnik(true);
-                      }}
-                    >
-                      + Dodaj prvog zakupnika
-                    </Button>
-                  </div>
-                ) : (
-                  zakupnici.map((z) => (
-                    <SelectItem key={z.id} value={z.id}>
-                      {z.naziv_firme ||
-                        z.ime_prezime ||
-                        z.kontakt_email ||
-                        "Nepoznat zakupnik"}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
+            {zakupnici.length === 0 ? (
+              <div className="rounded-md border border-dashed px-3 py-6 text-center">
+                <UserPlus className="mx-auto h-8 w-8 text-muted-foreground/40 mb-2" />
+                <p className="text-sm text-muted-foreground">
+                  Nema zakupnika u sustavu
+                </p>
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="mt-1 text-primary"
+                  onClick={() => setShowNewZakupnik(true)}
+                >
+                  + Dodaj prvog zakupnika
+                </Button>
+              </div>
+            ) : (
+              <SearchableSelect
+                id="zakupnik_id"
+                value={formData.zakupnik_id}
+                onChange={(val) => handleChange("zakupnik_id", val)}
+                required
+                placeholder="Odaberi zakupnika"
+                searchPlaceholder="Pretraži zakupnike…"
+                emptyMessage="Nema rezultata."
+                items={zakupnici.map((z) => ({
+                  value: z.id,
+                  label:
+                    z.naziv_firme ||
+                    z.ime_prezime ||
+                    z.kontakt_email ||
+                    "Nepoznat zakupnik",
+                  hint: z.oib ? `OIB ${z.oib}` : undefined,
+                }))}
+              />
+            )}
           </div>
           <Button
             type="button"

@@ -51,6 +51,7 @@ import {
   Printer,
   FileBarChart,
   Upload,
+  Loader2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -62,8 +63,10 @@ import NekretninarForm from "./NekretninarForm";
 import NekretninaDetails from "./NekretninaDetails";
 import { formatCurrency, formatArea } from "../../shared/formatters";
 
-import { generatePdf } from "../../shared/pdfGenerator";
-import PropertyPrintTemplate from "./PropertyPrintTemplate";
+import {
+  downloadPdfFromResponse,
+  extractBlobErrorDetail,
+} from "../../shared/downloadBlob";
 import { EmptyState } from "../../components/ui/empty-state";
 import ImportDialog from "../../components/ImportDialog";
 
@@ -100,6 +103,7 @@ const NekretninePage = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedProperty, setSelectedProperty] = useState(null);
   const [existingUnits, setExistingUnits] = useState([]);
+  const [existingParkings, setExistingParkings] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
   // Import Dialog State
@@ -132,7 +136,6 @@ const NekretninePage = () => {
   // Quick View State
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [viewProperty, setViewProperty] = useState(null);
-  const [viewContracts, setViewContracts] = useState([]);
 
   // Filtering state
   const [searchQuery, setSearchQuery] = useState("");
@@ -151,7 +154,7 @@ const NekretninePage = () => {
     );
   };
 
-  const printRef = React.useRef();
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const calculateOccupancy = (propertyId, allUnits) => {
     const units = allUnits.filter(
@@ -166,17 +169,21 @@ const NekretninePage = () => {
         totalCount: 0,
       };
 
-    // Build set of unit IDs that have an active contract for this property
-    const activeUnitIds = new Set(
-      (ugovori || [])
-        .filter(
-          (c) =>
-            c.nekretnina_id === propertyId &&
-            (c.status === "aktivno" || c.status === "na_isteku") &&
-            c.property_unit_id,
-        )
-        .map((c) => c.property_unit_id),
-    );
+    // Build set of unit IDs that have an active contract for this property.
+    // Includes both legacy primary FK and the M2M `property_unit_ids` set.
+    const activeUnitIds = new Set();
+    (ugovori || []).forEach((c) => {
+      if (
+        c.nekretnina_id !== propertyId ||
+        (c.status !== "aktivno" && c.status !== "na_isteku")
+      ) {
+        return;
+      }
+      if (c.property_unit_id) activeUnitIds.add(c.property_unit_id);
+      if (Array.isArray(c.property_unit_ids)) {
+        c.property_unit_ids.forEach((id) => activeUnitIds.add(id));
+      }
+    });
 
     const totalArea = units.reduce(
       (sum, u) => sum + (parseFloat(u.povrsina_m2) || 0),
@@ -212,18 +219,24 @@ const NekretninePage = () => {
   const handleCreate = () => {
     setSelectedProperty(null);
     setExistingUnits([]);
+    setExistingParkings([]);
     setIsDialogOpen(true);
   };
 
   const handleEdit = async (property) => {
     setSelectedProperty(property);
     setExistingUnits([]); // Reset while loading
+    setExistingParkings([]);
     try {
-      const res = await api.getUnitsForProperty(property.id);
-      setExistingUnits(res.data || []);
+      const [unitsRes, parkingsRes] = await Promise.all([
+        api.getUnitsForProperty(property.id),
+        api.getParking(property.id),
+      ]);
+      setExistingUnits(unitsRes.data || []);
+      setExistingParkings(parkingsRes.data || []);
     } catch (err) {
-      console.error("Failed to fetch units for editing", err);
-      toast.error("Neuspješno učitavanje jedinica");
+      console.error("Failed to fetch units/parking for editing", err);
+      toast.error("Neuspješno učitavanje podataka nekretnine");
     }
     setIsDialogOpen(true);
   };
@@ -235,31 +248,26 @@ const NekretninePage = () => {
 
   const handleView = (property) => {
     setViewProperty(property);
-    setViewContracts([]); // Reset
     setIsSheetOpen(true);
   };
 
   const handlePrint = async () => {
-    if (!viewProperty) return;
+    if (!viewProperty?.id) return;
+    setDownloadingPdf(true);
     try {
-      // Use contracts from store which are already enriching with tenant names
-      const propertyContracts = ugovori.filter(
-        (c) => c.nekretnina_id === viewProperty.id,
+      const res = await api.exportPropertyDetailPdf(viewProperty.id);
+      const safeName = (viewProperty.naziv || "nekretnina").replace(
+        /[^a-zA-Z0-9_-]/g,
+        "_",
       );
-      setViewContracts(propertyContracts);
-
-      // Allow state to update before printing
-      setTimeout(async () => {
-        await generatePdf(
-          printRef.current,
-          `nekretnina_${viewProperty.naziv.replace(/\s+/g, "_")}`,
-          "portrait",
-        );
-        toast.success("PDF je generiran");
-      }, 100);
+      downloadPdfFromResponse(res, `riforma-nekretnina-${safeName}.pdf`);
+      toast.success("PDF preuzet.");
     } catch (error) {
       console.error("Print error:", error);
-      toast.error("Greška pri generiranju PDF-a");
+      const detail = await extractBlobErrorDetail(error);
+      toast.error(detail);
+    } finally {
+      setDownloadingPdf(false);
     }
   };
 
@@ -267,6 +275,8 @@ const NekretninePage = () => {
     nekretnina,
     units,
     deletedUnitIds,
+    parkings,
+    deletedParkingIds,
     imageFile,
   }) => {
     setSubmitting(true);
@@ -322,6 +332,24 @@ const NekretninePage = () => {
           }
         }
 
+        // Handle Parkings (Create & Update)
+        if (parkings && parkings.length > 0) {
+          for (const p of parkings) {
+            if (p.id) {
+              await api.updateParking(p.id, p);
+            } else {
+              await api.createParking({ ...p, nekretnina_id: propertyId });
+            }
+          }
+        }
+
+        // Handle Parking Deletions
+        if (deletedParkingIds && deletedParkingIds.length > 0) {
+          for (const pid of deletedParkingIds) {
+            await api.deleteParking(pid);
+          }
+        }
+
         toast.success("Nekretnina je ažurirana");
       } else {
         const response = await api.createNekretnina(propertyData);
@@ -330,6 +358,11 @@ const NekretninePage = () => {
         if (units && units.length > 0) {
           for (const unit of units) {
             await api.createUnit(newPropertyId, unit);
+          }
+        }
+        if (parkings && parkings.length > 0) {
+          for (const p of parkings) {
+            await api.createParking({ ...p, nekretnina_id: newPropertyId });
           }
         }
         toast.success("Nekretnina je kreirana");
@@ -367,23 +400,6 @@ const NekretninePage = () => {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 md:px-6 space-y-8">
-      {/* Off-screen print template */}
-      <div className="absolute top-0 left-[-9999px] -z-50">
-        <PropertyPrintTemplate
-          ref={printRef}
-          property={viewProperty}
-          contracts={viewContracts}
-          units={
-            viewProperty
-              ? propertyUnits.filter(
-                  (u) =>
-                    u.nekretnina_id === viewProperty.id ||
-                    u.localId === viewProperty.id,
-                )
-              : []
-          }
-        />
-      </div>
 
       {/* Header Section */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -636,6 +652,7 @@ const NekretninePage = () => {
           <NekretninarForm
             nekretnina={selectedProperty}
             existingUnits={existingUnits}
+            existingParkings={existingParkings}
             onSubmit={handleSubmit}
             onCancel={() => setIsDialogOpen(false)}
             submitting={submitting}
@@ -657,9 +674,15 @@ const NekretninePage = () => {
               variant="outline"
               size="sm"
               onClick={handlePrint}
+              disabled={downloadingPdf}
               className="mr-8"
             >
-              <Printer className="mr-2 h-4 w-4" /> Ispiši
+              {downloadingPdf ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Printer className="mr-2 h-4 w-4" />
+              )}
+              Ispiši
             </Button>
           </SheetHeader>
           <div className="mt-6">

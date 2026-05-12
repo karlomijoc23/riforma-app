@@ -4,7 +4,6 @@ from datetime import date, timedelta
 
 os.environ.setdefault("AUTH_SECRET", "test-secret")
 os.environ.setdefault("USE_IN_MEMORY_DB", "true")
-os.environ.setdefault("OPENAI_API_KEY", "test")
 
 from app.core.config import get_settings  # noqa: E402
 
@@ -76,7 +75,7 @@ def _create_contract(
         "datum_zavrsetka": (today + timedelta(days=30)).isoformat(),
         "trajanje_mjeseci": 1,
         "osnovna_zakupnina": 500.0,
-        "zakupnina_po_m2": 10.0,
+        "zakupnina_po_m2": None,
         "cam_troskovi": 50.0,
         "polog_depozit": 100.0,
         "garancija": 0.0,

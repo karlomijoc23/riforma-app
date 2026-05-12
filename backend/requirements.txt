@@ -13,6 +13,17 @@ tzdata>=2024.2
 SQLAlchemy==2.0.36
 alembic==1.13.3
 asyncmy==0.2.9
+# SQLAlchemy async bridge — required for any async ORM use even though it's
+# a transitive dep of sqlalchemy[asyncio]. Pinning explicitly so prod
+# installs don't break if the extra resolves differently.
+greenlet>=3.0.0
+# Passlib's bcrypt backend reads `bcrypt.__about__` which was removed in
+# bcrypt 4.x — we pin <4 until passlib catches up. Without this, every
+# password verification raises `passlib.exc.MissingBackendError`.
+bcrypt>=3.2.0,<4.0
+# Used for the lightweight `riforma_dev.db` SQLite dev DB and pytest. Prod
+# uses MariaDB via asyncmy; aiosqlite stays a no-op there.
+aiosqlite>=0.20.0
 
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
@@ -57,6 +68,7 @@ importlib_metadata==8.7.0
 iniconfig==2.1.0
 isort==6.0.1
 Jinja2==3.1.6
+weasyprint>=62.3  # server-side PDF rendering (requires libpango + libcairo; see DEPLOY.md)
 jiter==0.11.0
 jmespath==1.0.1
 jq==1.10.0

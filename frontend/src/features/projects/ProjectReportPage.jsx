@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api } from "../../shared/api";
 import {
-  formatCurrency,
-  formatDate,
-  pdfDateStamp,
-} from "../../shared/formatters";
+  downloadPdfFromResponse,
+  extractBlobErrorDetail,
+} from "../../shared/downloadBlob";
+import { formatCurrency, formatDate } from "../../shared/formatters";
 import {
   Loader2,
   Printer,
@@ -44,7 +44,7 @@ export default function ProjectReportPage() {
   const navigate = useNavigate();
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
-  const reportRef = useRef(null);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -61,105 +61,24 @@ export default function ProjectReportPage() {
   }, [id]);
 
   const handleDownloadPdf = useCallback(async () => {
-    const element = reportRef.current;
-    if (!element) return;
+    if (!id) return;
+    setDownloading(true);
     try {
-      toast.info("Generiranje PDF-a...");
-      const html2canvas = (await import("html2canvas")).default;
-      const { jsPDF } = await import("jspdf");
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        windowWidth: element.scrollWidth,
-      });
-      const pdf = new jsPDF({
-        orientation: "portrait",
-        unit: "mm",
-        format: "a4",
-      });
-      const pageWidth = 210,
-        pageHeight = 297,
-        margin = 10;
-      const usableWidth = pageWidth - margin * 2;
-      const usableHeight = pageHeight - margin * 2 - 6;
-      const imgWidth = usableWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-      if (imgHeight <= usableHeight) {
-        pdf.addImage(
-          canvas.toDataURL("image/png"),
-          "PNG",
-          margin,
-          margin,
-          imgWidth,
-          imgHeight,
-        );
-        pdf.setFontSize(7);
-        pdf.setTextColor(160);
-        pdf.text("Stranica 1 od 1", pageWidth / 2, pageHeight - 5, {
-          align: "center",
-        });
-      } else {
-        let yOffset = 0,
-          page = 0;
-        const totalPages = Math.ceil(imgHeight / usableHeight);
-        while (yOffset < imgHeight) {
-          if (page > 0) pdf.addPage();
-          const sourceY = (yOffset / imgHeight) * canvas.height;
-          const sourceHeight = Math.min(
-            (usableHeight / imgHeight) * canvas.height,
-            canvas.height - sourceY,
-          );
-          const pageCanvas = document.createElement("canvas");
-          pageCanvas.width = canvas.width;
-          pageCanvas.height = sourceHeight;
-          const ctx = pageCanvas.getContext("2d");
-          ctx.drawImage(
-            canvas,
-            0,
-            sourceY,
-            canvas.width,
-            sourceHeight,
-            0,
-            0,
-            canvas.width,
-            sourceHeight,
-          );
-          const renderHeight = Math.min(usableHeight, imgHeight - yOffset);
-          pdf.addImage(
-            pageCanvas.toDataURL("image/png"),
-            "PNG",
-            margin,
-            margin,
-            imgWidth,
-            renderHeight,
-          );
-          pdf.setFontSize(7);
-          pdf.setTextColor(160);
-          pdf.text(
-            `Stranica ${page + 1} od ${totalPages}`,
-            pageWidth / 2,
-            pageHeight - 5,
-            { align: "center" },
-          );
-          yOffset += usableHeight;
-          page++;
-        }
-      }
-
+      const res = await api.exportProjectReportPdf(id);
       const safeName = (project?.name || "projekt").replace(
         /[^a-zA-Z0-9_-]/g,
         "_",
       );
-      pdf.save(`Izvjestaj_Projekt_${safeName}_${pdfDateStamp()}.pdf`);
-      toast.success("PDF uspješno generiran");
+      downloadPdfFromResponse(res, `riforma-projekt-${safeName}.pdf`);
+      toast.success("PDF preuzet.");
     } catch (err) {
       console.error("PDF generation failed", err);
-      toast.error("Greška pri generiranju PDF-a");
+      const detail = await extractBlobErrorDetail(err);
+      toast.error(detail);
+    } finally {
+      setDownloading(false);
     }
-  }, [project]);
+  }, [id, project]);
 
   if (loading) {
     return (
@@ -223,8 +142,18 @@ export default function ProjectReportPage() {
           <h1 className="text-lg font-semibold">Izvještaj projekta</h1>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleDownloadPdf}>
-            <Download className="mr-1 h-4 w-4" /> PDF
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDownloadPdf}
+            disabled={downloading}
+          >
+            {downloading ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-1 h-4 w-4" />
+            )}
+            PDF
           </Button>
           <Button size="sm" onClick={() => window.print()}>
             <Printer className="mr-1 h-4 w-4" /> Ispis
@@ -234,7 +163,6 @@ export default function ProjectReportPage() {
 
       {/* ═══════════════════ REPORT CONTENT ═══════════════════ */}
       <div
-        ref={reportRef}
         className="max-w-[800px] mx-auto bg-white"
         style={{
           fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",

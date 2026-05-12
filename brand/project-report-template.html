@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="hr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Izvještaj projekta — {{ project.name or "Riforma" }}</title>
+    {% include "partials/_base_styles.html" %}
+    <style>
+      .status-line {
+        display: inline-flex;
+        align-items: center;
+        gap: 2.5mm;
+        margin-top: 2mm;
+        font-size: 10pt;
+        color: rgba(255, 255, 255, 0.92);
+      }
+      .status-line__dot {
+        width: 2.5mm; height: 2.5mm; border-radius: 50%;
+      }
+
+      .progress-bar {
+        height: 3mm;
+        background: var(--color-subtle);
+        border-radius: 1.5mm;
+        overflow: hidden;
+      }
+      .progress-bar > span {
+        display: block; height: 100%;
+        background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+      }
+      .progress-bar.warn   > span { background: linear-gradient(90deg, #d97706, #f59e0b); }
+      .progress-bar.danger > span { background: linear-gradient(90deg, #b42318, #dc2626); }
+
+      .desc-box {
+        background: var(--color-subtle);
+        border-left: 3px solid var(--color-accent);
+        padding: 4mm 5mm;
+        border-radius: var(--radius-md);
+        font-size: 10pt;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+
+      .dot-inline {
+        display: inline-block;
+        width: 2.5mm; height: 2.5mm; border-radius: 50%;
+        margin-right: 1.5mm;
+        vertical-align: middle;
+      }
+
+      .income  { color: var(--status-positive-fg); font-weight: 700; }
+      .expense { color: var(--status-danger-fg);   font-weight: 700; }
+
+      .doc-grid { column-count: 2; column-gap: 4mm; }
+      .doc-grid .doc-pill {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 3mm 4mm;
+        margin: 0 0 3mm 0;
+        font-size: 9pt;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .doc-pill__name { font-weight: 600; color: var(--color-ink); }
+      .doc-pill__type { color: var(--color-muted); font-weight: 400; margin-left: 1.5mm; font-size: 8.5pt; }
+      .doc-pill__meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 1.5mm;
+        font-size: 8.5pt;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="report-head">
+      <p class="report-head__eyebrow">Izvještaj projekta</p>
+      <h1 class="report-head__title">{{ project.name }}</h1>
+      <div class="status-line">
+        <span class="status-line__dot" style="background: {{ status_color }};"></span>
+        <span>{{ status_label }}</span>
+      </div>
+      <div class="report-head__meta">
+        Datum izvještaja
+        <strong>{{ generated_at }}</strong>
+      </div>
+      <div class="report-head__accent-bar"></div>
+    </header>
+
+    <h2 class="section-title">Budžet i potrošnja</h2>
+    <table class="kpi-grid no-break">
+      <tr>
+        <td>
+          <p class="kpi__label">Budžet</p>
+          <div class="kpi__value">{{ budget | currency }}</div>
+        </td>
+        <td {% if budget_pct > 90 %}style="background:var(--status-danger-bg); border-color:var(--status-danger-bd);"{% endif %}>
+          <p class="kpi__label">Potrošeno</p>
+          <div class="kpi__value" {% if budget_pct > 90 %}style="color:var(--status-danger-fg);"{% endif %}>{{ spent | currency }}</div>
+          <p class="kpi__sub">{{ budget_pct }} % budžeta</p>
+        </td>
+        <td class="{% if remaining < 0 %}kpi--accent{% else %}kpi--positive{% endif %}">
+          <p class="kpi__label">Preostalo</p>
+          <div class="kpi__value">{{ remaining | currency }}</div>
+        </td>
+      </tr>
+    </table>
+
+    <div style="margin-top:6mm;">
+      <div style="display:flex;justify-content:space-between;font-size:9pt;margin-bottom:2mm;">
+        <span class="text-muted fw-semibold">Iskorištenost budžeta</span>
+        <span class="fw-bold">{{ budget_pct }} %</span>
+      </div>
+      <div class="progress-bar {% if budget_pct > 90 %}danger{% elif budget_pct > 70 %}warn{% endif %}">
+        <span style="width: {{ budget_pct | clamp_pct }}%;"></span>
+      </div>
+    </div>
+
+    {% if project.description %}
+    <h2 class="section-title">Opis projekta</h2>
+    <div class="desc-box">{{ project.description }}</div>
+    {% endif %}
+
+    {% if phases %}
+    <h2 class="section-title">Faze realizacije · {{ completed_phases }}/{{ phases|length }} završeno ({{ phase_pct }} %)</h2>
+    <div class="progress-bar" style="margin-bottom:4mm;">
+      <span style="width: {{ phase_pct | clamp_pct }}%;"></span>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Faza</th>
+          <th>Početak</th>
+          <th>Završetak</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for phase in phases %}
+        <tr>
+          <td class="fw-semibold">{{ phase.name }}</td>
+          <td>{{ phase.start_date | fdate }}</td>
+          <td>{{ phase.end_date | fdate }}</td>
+          <td><span class="dot-inline" style="background:{{ phase.status_color }};"></span>{{ phase.status_label }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if transactions %}
+    <h2 class="section-title">Financijski pregled</h2>
+    <table class="kpi-grid no-break">
+      <tr>
+        <td class="kpi--positive">
+          <p class="kpi__label">Ukupni prihodi</p>
+          <div class="kpi__value">{{ total_income | currency }}</div>
+        </td>
+        <td style="background:var(--status-danger-bg); border-color:var(--status-danger-bd);">
+          <p class="kpi__label" style="color:var(--status-danger-fg);">Ukupni rashodi</p>
+          <div class="kpi__value" style="color:var(--status-danger-fg);">{{ total_expense | currency }}</div>
+        </td>
+        <td class="{% if net_amount < 0 %}{% else %}kpi--accent{% endif %}"
+            {% if net_amount < 0 %}style="background:var(--status-danger-bg); border-color:var(--status-danger-bd);"{% endif %}>
+          <p class="kpi__label" {% if net_amount < 0 %}style="color:var(--status-danger-fg);"{% endif %}>Neto</p>
+          <div class="kpi__value" {% if net_amount < 0 %}style="color:var(--status-danger-fg);"{% endif %}>{{ net_amount | currency }}</div>
+        </td>
+      </tr>
+    </table>
+
+    <table class="data-table" style="margin-top:4mm;">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Kategorija</th>
+          <th>Opis</th>
+          <th class="num">Iznos</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tx in transactions %}
+        <tr>
+          <td>{{ tx.date | fdate }}</td>
+          <td style="text-transform:capitalize;">{{ tx.category or "—" }}</td>
+          <td>{{ tx.description or "—" }}</td>
+          <td class="num {% if tx.type == 'income' %}income{% else %}expense{% endif %}">
+            {% if tx.type == "income" %}+{% else %}−{% endif %}{{ tx.amount | currency }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if documents %}
+    <h2 class="section-title">Pravna dokumentacija</h2>
+    <div class="doc-grid">
+      {% for doc in documents %}
+      <div class="doc-pill">
+        <span class="doc-pill__name">
+          {{ doc.name }}<span class="doc-pill__type">({{ doc.type or "—" }})</span>
+        </span>
+        <span class="doc-pill__meta" style="color: {% if doc.status == 'approved' %}var(--status-positive-fg){% else %}var(--color-muted){% endif %};">
+          <span class="dot-inline" style="background:{% if doc.status == 'approved' %}var(--color-accent){% else %}#cbd5e1{% endif %};"></span>
+          {{ doc.status or "—" }}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </body>
+</html>

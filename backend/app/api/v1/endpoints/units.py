@@ -1,9 +1,11 @@
 from typing import Any, Dict, Optional
 
+from sqlalchemy import or_, select
+
 from app.api import deps
 from app.db.repositories.instance import property_units, ugovori
 from app.models.domain import PropertyUnitStatus, StatusUgovora
-from app.models.tables import UgovoriRow
+from app.models.tables import UgovoriRow, ugovor_units
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
@@ -11,6 +13,25 @@ router = APIRouter()
 
 # Statuses considered "active" for contract checks
 _ACTIVE_STATUSES = [StatusUgovora.AKTIVNO.value, StatusUgovora.NA_ISTEKU.value]
+
+
+async def _find_active_contract_holding_unit(unit_id: str):
+    """Look at BOTH the legacy primary FK and the junction table — a
+    multi-unit contract may hold this unit only through the M2M."""
+    junction_subq = (
+        select(ugovor_units.c.ugovor_id)
+        .where(ugovor_units.c.property_unit_id == unit_id)
+        .scalar_subquery()
+    )
+    return await ugovori.find_one(
+        extra_conditions=[
+            or_(
+                UgovoriRow.property_unit_id == unit_id,
+                UgovoriRow.id.in_(junction_subq),
+            ),
+            UgovoriRow.status.in_(_ACTIVE_STATUSES),
+        ],
+    )
 
 
 class PropertyUnitUpdate(BaseModel):
@@ -77,31 +98,40 @@ async def update_unit(
     if not update_data:
         return property_units.to_dict(existing)
 
-    # Validate status changes against active contracts
+    # Validate status changes against active contracts. Skip the check when
+    # the status isn't actually changing — an idempotent re-save (e.g. user
+    # edits the napomena field on a rented unit) shouldn't be rejected just
+    # because the unit ↔ contract state is historically inconsistent.
     if "status" in update_data:
-        new_status = update_data["status"]
-        active_contract = await ugovori.find_one(
-            extra_conditions=[UgovoriRow.status.in_(_ACTIVE_STATUSES)],
-            property_unit_id=id,
+        new_status_raw = update_data["status"]
+        new_status = (
+            new_status_raw.value
+            if isinstance(new_status_raw, PropertyUnitStatus)
+            else new_status_raw
         )
+        if new_status != existing.status:
+            active_contract = await _find_active_contract_holding_unit(id)
 
-        if active_contract and new_status == PropertyUnitStatus.DOSTUPNO:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Podprostor ima aktivan ugovor "
-                    f"({active_contract.interna_oznaka or '—'}). "
-                    "Status se automatski kontrolira putem ugovora."
-                ),
-            )
-        if not active_contract and new_status == PropertyUnitStatus.IZNAJMLJENO:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Podprostor nema aktivan ugovor — status 'iznajmljeno' "
-                    "se automatski postavlja prilikom kreiranja ugovora."
-                ),
-            )
+            if active_contract and new_status == PropertyUnitStatus.DOSTUPNO.value:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Podprostor ima aktivan ugovor "
+                        f"({active_contract.interna_oznaka or '—'}). "
+                        "Status se automatski kontrolira putem ugovora."
+                    ),
+                )
+            if (
+                not active_contract
+                and new_status == PropertyUnitStatus.IZNAJMLJENO.value
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Podprostor nema aktivan ugovor — status 'iznajmljeno' "
+                        "se automatski postavlja prilikom kreiranja ugovora."
+                    ),
+                )
 
     updated = await property_units.update_by_id(id, update_data)
     return property_units.to_dict(updated)
@@ -122,14 +152,13 @@ async def delete_unit(
     if not existing:
         raise HTTPException(status_code=404, detail="Jedinica nije pronađena")
 
-    # Prevent deletion if unit has active contracts
-    active_contract = await ugovori.find_one(
-        extra_conditions=[UgovoriRow.status.in_(_ACTIVE_STATUSES)],
-        property_unit_id=id,
-    )
+    # Prevent deletion if unit has active contracts (legacy primary FK or
+    # M2M junction). Returning 409 lets the frontend distinguish "delete
+    # blocked by referential integrity" from validation errors.
+    active_contract = await _find_active_contract_holding_unit(id)
     if active_contract:
         raise HTTPException(
-            status_code=400,
+            status_code=409,
             detail=(
                 f"Podprostor ima aktivan ugovor "
                 f"({active_contract.interna_oznaka or '—'}). "

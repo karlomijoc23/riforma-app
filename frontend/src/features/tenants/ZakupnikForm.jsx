@@ -17,7 +17,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "../../components/ui/accordion";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2, Plus, Loader2 } from "lucide-react";
 import { Checkbox } from "../../components/ui/checkbox";
 import { toast } from "../../components/ui/sonner";
 
@@ -893,7 +893,8 @@ const ZakupnikForm = ({
           data-testid="potvrdi-zakupnika-form"
           disabled={submitting}
         >
-          {submitting ? "Spremam..." : zakupnik ? "Ažuriraj" : "Kreiraj"}
+          {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {zakupnik ? "Ažuriraj" : "Kreiraj"}
         </Button>
         <Button
           type="button"

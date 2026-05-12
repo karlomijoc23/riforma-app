@@ -54,6 +54,7 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+.venv-brew/
 
 # Databases
 *.db

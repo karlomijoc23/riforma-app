@@ -59,6 +59,7 @@ import {
   TabsTrigger,
 } from "../../components/ui/tabs";
 import { EmptyState } from "../../components/ui/empty-state";
+import SplitBillDialog from "./SplitBillDialog";
 import {
   Plus,
   Filter,
@@ -82,6 +83,7 @@ import {
   XCircle,
   Undo2,
   CreditCard,
+  Layers,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -195,6 +197,10 @@ const RacuniPage = () => {
   // Delete state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [racunToDelete, setRacunToDelete] = useState(null);
+
+  // Bill split state — opens SplitBillDialog for the chosen master bill
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false);
+  const [splitMasterBill, setSplitMasterBill] = useState(null);
 
   // Payment recording state
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
@@ -569,7 +575,28 @@ const RacuniPage = () => {
         {racun.dobavljac || "\u2014"}
       </TableCell>
       <TableCell className="font-mono text-xs">
-        {racun.broj_racuna || "\u2014"}
+        <div className="flex items-center gap-1">
+          {racun.broj_racuna || "\u2014"}
+          {racun.is_master_bill && (
+            <Badge
+              variant="outline"
+              className="text-[10px] py-0 px-1.5 bg-blue-50 text-blue-700 border-blue-200"
+              title="Ovaj račun je podijeljen na podračune po jedinicama"
+            >
+              <Layers className="h-3 w-3 mr-0.5" />
+              podijeljen
+            </Badge>
+          )}
+          {racun.master_bill_id && (
+            <Badge
+              variant="outline"
+              className="text-[10px] py-0 px-1.5 bg-slate-50 text-slate-600 border-slate-200"
+              title="Ovaj račun je dio podjele master računa"
+            >
+              dio podjele
+            </Badge>
+          )}
+        </div>
       </TableCell>
       <TableCell className="text-sm">
         {formatDate(racun.datum_racuna)}
@@ -646,6 +673,19 @@ const RacuniPage = () => {
                 <DropdownMenuItem onClick={() => openPaymentDialog(racun)}>
                   <CreditCard className="mr-2 h-4 w-4" /> Evidentiraj uplatu
                 </DropdownMenuItem>
+                {/* Split available when the bill targets a building (has
+                    nekretnina_id) and isn't itself a child of another split */}
+                {racun.nekretnina_id && !racun.master_bill_id && (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSplitMasterBill(racun);
+                      setSplitDialogOpen(true);
+                    }}
+                  >
+                    <Layers className="mr-2 h-4 w-4" />
+                    {racun.is_master_bill ? "Pregled podjele" : "Podijeli na jedinice"}
+                  </DropdownMenuItem>
+                )}
                 {/* Approval actions based on current status */}
                 {(!racun.approval_status ||
                   racun.approval_status === "draft") && (
@@ -1590,6 +1630,13 @@ const RacuniPage = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      <SplitBillDialog
+        open={splitDialogOpen}
+        onOpenChange={setSplitDialogOpen}
+        masterBill={splitMasterBill}
+        onSplitDone={refreshRacuni}
+      />
     </div>
   );
 };

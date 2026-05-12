@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="hr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Izvještaj održavanja</title>
+    {% include "partials/_base_styles.html" %}
+    <style>
+      @page {
+        size: A4 landscape;
+        margin: 12mm 14mm 16mm 14mm;
+      }
+      .report-head { margin: -12mm -14mm 8mm -14mm; padding: 12mm 14mm 10mm 14mm; }
+
+      .two-col { display: flex; gap: 6mm; }
+      .two-col > * { flex: 1; }
+
+      .dist-row {
+        display: flex;
+        align-items: center;
+        gap: 3mm;
+        padding: 2mm 0;
+        font-size: 9pt;
+      }
+      .dist-row__dot {
+        width: 2.5mm; height: 2.5mm; border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .dist-row__label {
+        min-width: 32mm;
+        color: var(--color-ink-soft);
+      }
+      .dist-row__bar {
+        flex: 1;
+        height: 2mm;
+        background: var(--color-subtle);
+        border-radius: 1mm;
+        overflow: hidden;
+      }
+      .dist-row__bar > span {
+        display: block; height: 100%;
+      }
+      .dist-row__count {
+        min-width: 12mm;
+        text-align: right;
+        font-weight: 600;
+        color: var(--color-primary);
+      }
+      .dist-row__pct {
+        min-width: 14mm;
+        text-align: right;
+        font-size: 8pt;
+        color: var(--color-muted);
+      }
+
+      .by-row {
+        display: flex; justify-content: space-between;
+        padding: 2mm 0;
+        border-bottom: 1px dashed var(--color-border);
+        font-size: 9pt;
+      }
+      .by-row:last-child { border-bottom: 0; }
+      .by-row strong { color: var(--color-primary); }
+
+      .alert {
+        background: var(--status-warn-bg);
+        border: 1px solid var(--status-warn-bd);
+        border-left: 4px solid var(--status-warn-fg);
+        border-radius: var(--radius-md);
+        padding: 4mm 5mm;
+        margin: 6mm 0;
+      }
+      .alert h3 {
+        margin: 0 0 2mm 0;
+        font-size: 10pt;
+        color: var(--status-warn-fg);
+        font-weight: 700;
+      }
+      .alert ul { margin: 0; padding-left: 5mm; font-size: 9pt; }
+      .alert li { margin: 1mm 0; }
+
+      .task-desc {
+        font-size: 8pt;
+        color: var(--color-muted);
+        margin-top: 0.5mm;
+      }
+
+      .dot-inline {
+        display: inline-block;
+        width: 2.5mm; height: 2.5mm; border-radius: 50%;
+        margin-right: 1.5mm;
+        vertical-align: middle;
+      }
+
+      .overdue { color: var(--status-danger-fg); font-weight: 700; }
+    </style>
+  </head>
+  <body class="is-landscape">
+    <header class="report-head">
+      <p class="report-head__eyebrow">Izvještaj održavanja</p>
+      <h1 class="report-head__title">Zadaci održavanja</h1>
+      <p class="report-head__subtitle">Status, prioriteti i troškovi održavanja kroz portfelj.</p>
+      <div class="report-head__meta">
+        Datum izvještaja
+        <strong>{{ generated_at }}</strong>
+      </div>
+      <div class="report-head__accent-bar"></div>
+    </header>
+
+    <h2 class="section-title">Ključni pokazatelji</h2>
+    <table class="kpi-grid">
+      <tr>
+        <td>
+          <p class="kpi__label">Ukupno zadataka</p>
+          <div class="kpi__value">{{ totals.total }}</div>
+          <p class="kpi__sub">Otvorenih {{ totals.open }} · Završenih {{ totals.completed }}</p>
+        </td>
+        <td class="kpi--info">
+          <p class="kpi__label">Kritičnih</p>
+          <div class="kpi__value">{{ totals.critical }}</div>
+          <p class="kpi__sub">Prioritet visoki</p>
+        </td>
+        <td {% if totals.overdue > 0 %}style="background: var(--status-danger-bg); border-color: var(--status-danger-bd);"{% endif %}>
+          <p class="kpi__label">Prekoračen rok</p>
+          <div class="kpi__value" {% if totals.overdue > 0 %}style="color: var(--status-danger-fg);"{% endif %}>{{ totals.overdue }}</div>
+          <p class="kpi__sub">Hitno za rješavanje</p>
+        </td>
+        <td class="kpi--accent">
+          <p class="kpi__label">Ukupni troškovi</p>
+          <div class="kpi__value">{{ totals.cost_total | currency }}</div>
+          <p class="kpi__sub">
+            Materijal {{ totals.cost_material | currency }} · Rad {{ totals.cost_labor | currency }}
+          </p>
+        </td>
+      </tr>
+    </table>
+
+    <div class="two-col" style="margin-top:8mm;">
+      <div>
+        <h2 class="section-title">Raspodjela po statusu</h2>
+        {% for s in status_summary %}
+        <div class="dist-row">
+          <span class="dist-row__dot" style="background:{{ s.color }};"></span>
+          <span class="dist-row__label">{{ s.label }}</span>
+          <span class="dist-row__bar"><span style="width:{{ s.pct | clamp_pct }}%;background:{{ s.color }};"></span></span>
+          <span class="dist-row__count">{{ s.count }}</span>
+          <span class="dist-row__pct">{{ s.pct }} %</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div>
+        <h2 class="section-title">Raspodjela po prioritetu</h2>
+        {% for p in priority_summary %}
+        <div class="dist-row">
+          <span class="dist-row__dot" style="background:{{ p.color }};"></span>
+          <span class="dist-row__label">{{ p.label }}</span>
+          <span class="dist-row__bar"><span style="width:{{ p.pct | clamp_pct }}%;background:{{ p.color }};"></span></span>
+          <span class="dist-row__count">{{ p.count }}</span>
+          <span class="dist-row__pct">{{ p.pct }} %</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if tasks_by_property or costs_by_property %}
+    <div class="two-col" style="margin-top:6mm;">
+      <div>
+        <h2 class="section-title">Zadaci po nekretnini</h2>
+        {% for row in tasks_by_property %}
+        <div class="by-row"><span>{{ row.name }}</span><strong>{{ row.count }}</strong></div>
+        {% endfor %}
+      </div>
+      <div>
+        <h2 class="section-title">Troškovi po nekretnini</h2>
+        {% for row in costs_by_property %}
+        <div class="by-row"><span>{{ row.name }}</span><strong>{{ row.cost | currency }}</strong></div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if overdue_preview and overdue_preview|length > 0 %}
+    <div class="alert">
+      <h3>⚠ Zadaci s prekoračenim rokom ({{ totals.overdue }})</h3>
+      <ul>
+        {% for t in overdue_preview %}
+        <li><strong>{{ t.naziv }}</strong> · {{ t.nekretnina_naziv }} · rok {{ t.rok | fdate }}</li>
+        {% endfor %}
+        {% if totals.overdue > overdue_preview|length %}
+        <li style="list-style:none;font-style:italic;color:var(--color-muted);">… i još {{ totals.overdue - overdue_preview|length }} zadataka.</li>
+        {% endif %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <h2 class="section-title">Detaljan pregled zadataka</h2>
+    {% if tasks %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:28%">Naziv</th>
+          <th>Nekretnina</th>
+          <th>Prioritet</th>
+          <th>Status</th>
+          <th>Rok</th>
+          <th class="num">Materijal</th>
+          <th class="num">Rad</th>
+          <th>Dodijeljeno</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tasks %}
+        <tr>
+          <td>
+            <div class="fw-semibold">{{ t.naziv or "—" }}</div>
+            {% if t.opis %}<div class="task-desc">{{ t.opis }}</div>{% endif %}
+          </td>
+          <td>{{ t.nekretnina_naziv }}</td>
+          <td><span class="dot-inline" style="background:{{ t.priority_color }};"></span>{{ t.priority_label }}</td>
+          <td><span class="dot-inline" style="background:{{ t.status_color }};"></span>{{ t.status_label }}</td>
+          <td><span {% if t.is_overdue %}class="overdue"{% endif %}>{{ t.rok | fdate }}</span></td>
+          <td class="num">{% if t.trosak_materijal is not none %}{{ t.trosak_materijal | currency }}{% else %}—{% endif %}</td>
+          <td class="num">{% if t.trosak_rad is not none %}{{ t.trosak_rad | currency }}{% else %}—{% endif %}</td>
+          <td>{{ t.dodijeljeno_naziv }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="5" class="text-right">UKUPNO</td>
+          <td class="num">{{ totals.cost_material | currency }}</td>
+          <td class="num">{{ totals.cost_labor | currency }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+    {% else %}
+    <div class="panel panel--accent text-muted" style="text-align:center;">
+      Nema zadataka održavanja.
+    </div>
+    {% endif %}
+  </body>
+</html>

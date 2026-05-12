@@ -25,6 +25,7 @@ from app.models.tables import (
     RacuniRow,
 )
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import Response as FastAPIResponse
 from PIL import Image
 from pydantic import BaseModel
 from pypdf import PdfReader
@@ -770,3 +771,43 @@ Vrati JSON s ovom strukturom (bez markdown formatiranja):
         raise HTTPException(
             status_code=500, detail="Greška pri generiranju mjesečnog izvještaja"
         )
+
+
+# --------------- Monthly Report PDF Export ---------------
+
+
+class MonthlyReportPdfRequest(BaseModel):
+    mjesec: int
+    godina: int
+    # The structured report payload returned by `/ai/monthly-report`. We
+    # accept it from the client so the PDF endpoint doesn't have to
+    # re-run the AI call (saves cost + latency, and guarantees the PDF
+    # matches exactly what the user sees on screen).
+    report: Dict[str, Any]
+    source: Optional[str] = None
+
+
+@router.post(
+    "/monthly-report/export-pdf",
+    dependencies=[Depends(deps.require_scopes("reports:read"))],
+)
+async def export_monthly_report_pdf(
+    body: MonthlyReportPdfRequest,
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Render the structured monthly report into a server-side PDF.
+
+    The data comes from the client (already produced by /monthly-report)
+    so this is a pure rendering step — no DB reads, no AI calls.
+    """
+    from app.services.monthly_report_pdf_service import render_monthly_report_pdf
+
+    pdf_bytes = render_monthly_report_pdf(
+        body.report, body.mjesec, body.godina, source=body.source
+    )
+    filename = f"riforma-mjesecni-izvjestaj-{body.godina}-{body.mjesec:02d}.pdf"
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

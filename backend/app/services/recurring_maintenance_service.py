@@ -1,9 +1,14 @@
 import logging
 import uuid
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+
+from app.core.time import local_today
 from app.db.repositories.instance import maintenance_tasks
-from app.models.tables import MaintenanceTaskRow
+from app.db.session import get_async_session_factory
+from app.models.tables import MaintenanceTaskRow, maintenance_task_units
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +42,7 @@ async def generate_recurring_tasks():
     )
 
     created_count = 0
-    today = date.today()
+    today = local_today()
     today_str = today.isoformat()
 
     for task in recurring_tasks:
@@ -54,17 +59,26 @@ async def generate_recurring_tasks():
             if due_date and due_date > today:
                 continue
 
-        # Check if next occurrence already exists
+        # Check if ANY child already exists for this parent (not just active
+        # ones). A completed instance for the upcoming slot must also block a
+        # re-create — otherwise two scheduler runs race and produce doubles.
         task_id = task.id
         existing_next = await maintenance_tasks.find_one(
             parent_task_id=task_id,
             extra_conditions=[
-                MaintenanceTaskRow.status.in_(["novi", "u_tijeku"]),
+                MaintenanceTaskRow.status.in_(
+                    ["novi", "u_tijeku", "zavrseno", "arhivirano"]
+                ),
             ],
+            order_by="rok",
+            order_dir="desc",
         )
 
-        if existing_next:
-            continue
+        if existing_next and existing_next.rok and due_date:
+            # If the most recent child's slot is already beyond the parent's
+            # current due date, the next cycle is already scheduled — skip.
+            if existing_next.rok >= due_date + RECURRENCE_INTERVALS[pattern]:
+                continue
 
         # Calculate next due date
         interval = RECURRENCE_INTERVALS[pattern]
@@ -111,15 +125,48 @@ async def generate_recurring_tasks():
             "created_at": datetime.combine(today, time.min, tzinfo=timezone.utc),
         }
 
-        await maintenance_tasks.create(new_task)
-        created_count += 1
+        # Pull the parent's full unit set so multi-unit recurring tasks
+        # propagate to every child via the junction (not just primary FK).
+        session_factory = get_async_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                select(maintenance_task_units.c.property_unit_id).where(
+                    maintenance_task_units.c.maintenance_task_id == task_id
+                )
+            )
+            parent_unit_ids = [row[0] for row in result.all()]
+        if task.property_unit_id and task.property_unit_id not in parent_unit_ids:
+            parent_unit_ids.insert(0, task.property_unit_id)
 
-        logger.info(
-            "Created recurring task '%s' due %s (pattern: %s)",
-            new_task["naziv"],
-            next_due.isoformat(),
-            pattern,
-        )
+        try:
+            created = await maintenance_tasks.create(new_task)
+            # Mirror the parent's junction on the new child so the unit set
+            # stays consistent across recurring instances.
+            if parent_unit_ids:
+                async with session_factory() as session:
+                    async with session.begin():
+                        for uid in parent_unit_ids:
+                            await session.execute(
+                                maintenance_task_units.insert().values(
+                                    maintenance_task_id=created.id,
+                                    property_unit_id=uid,
+                                )
+                            )
+            created_count += 1
+            logger.info(
+                "Created recurring task '%s' due %s (pattern: %s)",
+                new_task["naziv"],
+                next_due.isoformat(),
+                pattern,
+            )
+        except IntegrityError:
+            # uq_maintenance_recurrence_slot caught a concurrent insert — a
+            # sibling scheduler worker already created this slot. Safe no-op.
+            logger.info(
+                "Recurring slot already exists for parent %s / %s — skipping",
+                task_id,
+                next_due.isoformat(),
+            )
 
     if created_count:
         logger.info("Created %d recurring maintenance tasks.", created_count)

@@ -137,10 +137,12 @@ async def send_message(
                 continue
             history.append({"role": m.role, "content": m.content})
 
-    # Run agent turn
+    # Run agent turn. Pass the caller's scopes so the tool list Claude sees
+    # is filtered to only tools the user is allowed to invoke (a viewer can't
+    # "talk the agent into" creating records they couldn't POST directly).
     try:
         assistant_text, pending_action = await run_agent_turn(
-            history, body.content
+            history, body.content, user_scopes=current_user.get("scopes") or []
         )
     except Exception as e:
         logger.exception("Agent turn failed")
@@ -196,11 +198,14 @@ async def confirm_action(
     pending = msg.pending_action
 
     if body.confirmed:
-        # Execute the write tool
+        # Execute the write tool. Re-check scopes at execution time in case
+        # the stored pending_action references a tool the user no longer has
+        # permission to run (role changed between message and confirm).
         result_str = await execute_write_tool(
             pending["tool_name"],
             pending["tool_input"],
             current_user["id"],
+            user_scopes=current_user.get("scopes") or [],
         )
 
         # Save confirmation result as new assistant message

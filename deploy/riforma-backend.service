@@ -24,7 +24,7 @@ StartLimitIntervalSec=60
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/riforma/backend/uploads /opt/riforma/logs
+ReadWritePaths=/opt/riforma/uploads /opt/riforma/logs
 PrivateTmp=true
 
 # Logging

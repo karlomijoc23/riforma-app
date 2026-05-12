@@ -137,15 +137,6 @@ export const formatBooleanish = (value) => {
   return value;
 };
 
-/** Returns dd.mm.yy string for use in PDF filenames */
-export const pdfDateStamp = () => {
-  const d = new Date();
-  const dd = d.getDate().toString().padStart(2, "0");
-  const mm = (d.getMonth() + 1).toString().padStart(2, "0");
-  const yy = d.getFullYear().toString().slice(-2);
-  return `${dd}.${mm}.${yy}`;
-};
-
 export const APPROVAL_STATUS_LABELS = {
   draft: "Nacrt",
   pending_approval: "Čeka odobrenje",
@@ -170,6 +161,7 @@ export const formatPropertyType = (value) => {
   }
   const map = {
     poslovna_zgrada: "Poslovna zgrada",
+    stambeni_objekt: "Stambeni objekt",
     stan: "Stan",
     zemljiste: "Zemljište",
     ostalo: "Ostalo",

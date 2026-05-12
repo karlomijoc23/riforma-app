@@ -104,6 +104,9 @@ export const AuthProvider = ({ children }) => {
       login,
       logout,
       refresh: syncUser,
+      // Alias so feature code that wants "refresh the current user object
+      // after a profile mutation" doesn't need to know about syncUser.
+      refreshUser: syncUser,
     }),
     [user, loading, login, logout, syncUser],
   );

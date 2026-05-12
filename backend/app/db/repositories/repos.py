@@ -4,7 +4,7 @@ import asyncio
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, or_, select
 
 from app.db.repositories.base import BaseRepository
 from app.models.tables import (
@@ -70,6 +70,7 @@ class TenantMembershipRepository(BaseRepository[TenantMembershipRow]):
 class NekretnineRepository(BaseRepository[NekretnineRow]):
     model = NekretnineRow
     tenant_scoped = True
+    invalidates_dashboard_cache = True
 
     async def portfolio_value(self) -> float:
         """Return SUM(trzisna_vrijednost) via SQL."""
@@ -92,6 +93,7 @@ class NekretnineRepository(BaseRepository[NekretnineRow]):
 
 class PropertyUnitRepository(BaseRepository[PropertyUnitRow]):
     model = PropertyUnitRow
+    invalidates_dashboard_cache = True
     tenant_scoped = True
 
     async def occupancy_stats(
@@ -144,11 +146,13 @@ class PropertyUnitRepository(BaseRepository[PropertyUnitRow]):
 class ZakupniciRepository(BaseRepository[ZakupniciRow]):
     model = ZakupniciRow
     tenant_scoped = True
+    invalidates_dashboard_cache = True
 
 
 class UgovoriRepository(BaseRepository[UgovoriRow]):
     model = UgovoriRow
     tenant_scoped = True
+    invalidates_dashboard_cache = True
 
     async def status_breakdown(self) -> Dict[str, int]:
         """Return {status: count} using SQL GROUP BY instead of Python loops."""
@@ -266,6 +270,7 @@ class DokumentiRepository(BaseRepository[DokumentiRow]):
 class MaintenanceTaskRepository(BaseRepository[MaintenanceTaskRow]):
     model = MaintenanceTaskRow
     tenant_scoped = True
+    invalidates_dashboard_cache = True
 
 
 class ActivityLogRepository(BaseRepository[ActivityLogRow]):
@@ -316,6 +321,7 @@ class TenantSettingsRepository(BaseRepository[TenantSettingsRow]):
 class RacuniRepository(BaseRepository[RacuniRow]):
     model = RacuniRow
     tenant_scoped = True
+    invalidates_dashboard_cache = True
 
     async def analytics_summary(
         self,

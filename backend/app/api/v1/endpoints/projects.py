@@ -23,6 +23,7 @@ from app.models.domain import (
     TransactionType,
 )
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import Response as FastAPIResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -180,6 +181,32 @@ async def get_project(
     if not item:
         raise HTTPException(status_code=404, detail="Projekt nije pronađen")
     return await _build_project_response(item)
+
+
+@router.get(
+    "/{id}/export-pdf",
+    dependencies=[Depends(deps.require_scopes("projects:read"))],
+)
+async def export_project_report_pdf(
+    id: str,
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Server-side PDF of a single project's status report."""
+    from app.services.project_report_pdf_service import render_project_report_pdf
+
+    pdf_bytes = await render_project_report_pdf(id)
+    item = await projekti.get_by_id(id)
+    safe_name = "projekt"
+    if item and item.name:
+        safe_name = "".join(
+            c if c.isalnum() or c in ("-", "_") else "_" for c in item.name
+        )[:60]
+    filename = f"riforma-projekt-{safe_name}.pdf"
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.put(

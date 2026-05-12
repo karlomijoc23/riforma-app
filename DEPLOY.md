@@ -75,12 +75,16 @@ nano .env
 | `SEED_ADMIN_ON_STARTUP`   | Kreiraj admina pri startu | `true` (postavi `false` nakon)                                  |
 | `BACKEND_CORS_ORIGINS`    | Frontend URL-ovi          | `http://IP_SERVERA,https://riforma.com`                         |
 | `ANTHROPIC_API_KEY`       | Claude AI kljuc           | `sk-ant-api03-...`                                              |
+| `UPLOAD_DIR`              | Direktorij za uploade     | `/opt/riforma/uploads` *(mora se poklapati s systemd `ReadWritePaths` i `chown riforma`)* |
 
 ---
 
 ## 4. Instaliraj backend
 
 ```bash
+# Native biblioteke za WeasyPrint (PDF generiranje ugovora/aneksa)
+sudo apt install -y libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libcairo2 libgdk-pixbuf-2.0-0
+
 # Instaliraj Python dependencies
 sudo -u riforma /opt/riforma/backend/.venv/bin/pip install -r /opt/riforma/backend/requirements.txt
 

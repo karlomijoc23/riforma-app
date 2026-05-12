@@ -1,7 +1,7 @@
 import logging
 import secrets
 import string
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.api import deps
 from app.core.roles import resolve_membership_role, resolve_role_scopes
@@ -24,6 +24,7 @@ VALID_ROLES = {
     "accountant",
     "unositelj",
     "vendor",
+    "tenant",
 }
 
 
@@ -71,17 +72,43 @@ async def create_user(
         "role": user_in.role,
         "scopes": resolve_role_scopes(user_in.role, user_in.scopes),
         "password_hash": hash_password(temp_password),
+        # Force rotation on first login since admin issued this password.
+        "must_change_password": True,
     }
 
     new_user_row = await users.create(user_data)
 
     user_dict = users.to_dict(new_user_row)
     response_data = UserPublic(**user_dict).model_dump()
-    # Return the temp password so the admin can share it with the new user.
-    # This is the only time it is visible -- it is not stored in plaintext.
-    # NOTE: Ideally, send via email when SMTP is configured. For now, the
-    # admin copies it from the response and shares it securely.
-    response_data["temp_password"] = temp_password
+
+    # Email the temp password rather than returning it in the response when
+    # SMTP is configured. Plaintext passwords in API responses leak into
+    # access logs, error trackers, and HAR captures — undesirable even for
+    # a one-shot value. Fallback to `temp_password` field only when send
+    # fails so the admin still has a way to share it manually.
+    from app.core.email import send_email
+
+    invite_html = (
+        '<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">'
+        '<div style="background:#1d3557;color:#fff;padding:18px;'
+        'border-radius:8px 8px 0 0;">'
+        f'<h2 style="margin:0;">Dobrodošli, {user_in.full_name}</h2>'
+        '<p style="margin:4px 0 0;opacity:0.85;">Riforma platforma</p>'
+        '</div>'
+        '<div style="padding:18px;background:#f8fafc;border:1px solid #e2e8f0;'
+        'border-radius:0 0 8px 8px;">'
+        f'<p>Kreiran Vam je račun s adresom <strong>{email}</strong>.</p>'
+        f'<p>Privremena lozinka (potrebno ju je promijeniti pri prvoj prijavi):</p>'
+        f'<p style="font-family:monospace;font-size:18px;background:#e2e8f0;'
+        f'padding:10px 14px;border-radius:6px;">{temp_password}</p>'
+        '</div></div>'
+    )
+    sent = await send_email(
+        email, "Riforma · vaš pristupni račun", invite_html
+    )
+    response_data["delivery"] = "email" if sent else "response"
+    if not sent:
+        response_data["temp_password"] = temp_password
     return response_data
 
 
@@ -172,6 +199,60 @@ async def get_me(
         raise HTTPException(status_code=404, detail="Korisnik nije pronađen")
     user_dict = users.to_dict(user_row)
     return UserPublic(**user_dict)
+
+
+class ChangePasswordBody(BaseModel):
+    """Self-service password change. `current_password` is required for
+    normal rotations; users flagged `must_change_password` (e.g. fresh
+    invitation) may skip it since the temp password is admin-issued."""
+
+    current_password: Optional[str] = None
+    new_password: str
+
+
+@router.put("/me/password")
+async def change_my_password(
+    body: ChangePasswordBody,
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Let the current user rotate their own password. Required to clear
+    the `must_change_password` flag set by admin invites."""
+    from datetime import datetime, timezone
+
+    from app.core.security import hash_password, verify_password
+
+    user_row = await users.get_by_id(current_user["id"])
+    if not user_row:
+        raise HTTPException(status_code=404, detail="Korisnik nije pronađen")
+
+    # First-time rotation (admin-issued temp password) doesn't require the
+    # user to type the temp password again — the auth they just used IS
+    # the temp password. Normal rotations require it for safety.
+    if not user_row.must_change_password:
+        if not body.current_password:
+            raise HTTPException(
+                status_code=400, detail="Trenutna lozinka je obavezna."
+            )
+        if not verify_password(body.current_password, user_row.password_hash):
+            raise HTTPException(
+                status_code=400, detail="Trenutna lozinka nije ispravna."
+            )
+
+    if len(body.new_password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Nova lozinka mora imati najmanje 8 znakova.",
+        )
+
+    await users.update_by_id(
+        user_row.id,
+        {
+            "password_hash": hash_password(body.new_password),
+            "password_changed_at": datetime.now(timezone.utc),
+            "must_change_password": False,
+        },
+    )
+    return {"message": "Lozinka uspješno promijenjena."}
 
 
 class AssignRoleBody(BaseModel):

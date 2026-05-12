@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="hr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Detalji nekretnine — {{ property.naziv or "Riforma" }}</title>
+    {% include "partials/_base_styles.html" %}
+    <style>
+      .two-col { display:flex; gap: 6mm; }
+      .two-col > * { flex: 1; }
+
+      .facts-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 9.5pt;
+      }
+      .facts-table td {
+        padding: 2.5mm 0;
+        border-bottom: 1px dashed var(--color-border);
+        vertical-align: top;
+      }
+      .facts-table td.label {
+        color: var(--color-muted);
+        font-size: 8.5pt;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        width: 38%;
+        font-weight: 600;
+      }
+      .facts-table td.value {
+        text-align: right;
+        font-weight: 600;
+        color: var(--color-ink);
+      }
+      .facts-table tr:last-child td { border-bottom: 0; }
+
+      .occ-row {
+        display: flex; justify-content: space-between;
+        align-items: center;
+        margin: 3mm 0 2mm 0;
+        font-size: 9.5pt;
+      }
+      .occ-bar {
+        height: 3mm;
+        background: var(--color-subtle);
+        border-radius: 1.5mm;
+        overflow: hidden;
+      }
+      .occ-bar > span {
+        display: block;
+        height: 100%;
+        background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+      }
+      .occ-bar.warn > span { background: linear-gradient(90deg, #d97706, #f59e0b); }
+      .occ-bar.danger > span { background: linear-gradient(90deg, #b42318, #dc2626); }
+
+      .pill { display:inline-block; padding: 0.6mm 2.5mm; border-radius:999px; font-size:7.5pt; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; border:1px solid; }
+      .pill-positive { background: var(--status-positive-bg); color: var(--status-positive-fg); border-color: var(--status-positive-bd); }
+      .pill-info     { background: var(--status-info-bg);     color: var(--status-info-fg);     border-color: var(--status-info-bd); }
+      .pill-warn     { background: var(--status-warn-bg);     color: var(--status-warn-fg);     border-color: var(--status-warn-bd); }
+      .pill-danger   { background: var(--status-danger-bg);   color: var(--status-danger-fg);   border-color: var(--status-danger-bd); }
+      .pill-neutral  { background: var(--color-subtle);       color: var(--color-ink-soft);    border-color: var(--color-border); }
+
+      .notes-box {
+        background: var(--color-subtle);
+        border-left: 3px solid var(--color-accent);
+        padding: 4mm 5mm;
+        border-radius: var(--radius-md);
+        white-space: pre-wrap;
+        font-size: 9.5pt;
+      }
+
+      .report-head__location {
+        font-size: 10pt;
+        color: rgba(255,255,255,0.85);
+        margin-top: 1mm;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="report-head">
+      <p class="report-head__eyebrow">Nekretnina · pojedinačni izvještaj</p>
+      <h1 class="report-head__title">{{ property.naziv or "—" }}</h1>
+      <p class="report-head__location">{{ property.adresa or "—" }}{% if property.grad %}, {{ property.grad }}{% endif %}</p>
+      <div class="report-head__meta">
+        Datum izvještaja
+        <strong>{{ generated_at }}</strong>
+      </div>
+      <div class="report-head__accent-bar"></div>
+    </header>
+
+    <h2 class="section-title">Osnovni podaci</h2>
+    <div class="two-col">
+      <table class="facts-table">
+        <tr><td class="label">Vrsta</td><td class="value">{{ property.type_label }}</td></tr>
+        <tr><td class="label">Ukupna površina</td><td class="value">{{ property.povrsina | number(0) }} m²</td></tr>
+        {% if property.povrsina_objekta %}<tr><td class="label">Površina objekta</td><td class="value">{{ property.povrsina_objekta | number(0) }} m²</td></tr>{% endif %}
+        {% if property.povrsina_zemljista %}<tr><td class="label">Površina zemljišta</td><td class="value">{{ property.povrsina_zemljista | number(0) }} m²</td></tr>{% endif %}
+        {% if property.godina_izgradnje %}<tr><td class="label">Godina izgradnje</td><td class="value">{{ property.godina_izgradnje }}</td></tr>{% endif %}
+        {% if property.vlasnik %}<tr><td class="label">Vlasnik</td><td class="value">{{ property.vlasnik }}</td></tr>{% endif %}
+        {% if property.udio_vlasnistva %}<tr><td class="label">Udio vlasništva</td><td class="value">{{ property.udio_vlasnistva }}</td></tr>{% endif %}
+        {% if property.katastarska_opcina %}<tr><td class="label">Kat. općina</td><td class="value">{{ property.katastarska_opcina }}</td></tr>{% endif %}
+        {% if property.broj_kat_cestice %}<tr><td class="label">Br. kat. čestice</td><td class="value">{{ property.broj_kat_cestice }}</td></tr>{% endif %}
+      </table>
+      <table class="facts-table">
+        {% if property.zadnja_obnova %}<tr><td class="label">Zadnja obnova</td><td class="value">{{ property.zadnja_obnova }}</td></tr>{% endif %}
+        {% if property.osiguranje %}<tr><td class="label">Osiguranje</td><td class="value">{{ property.osiguranje }}</td></tr>{% endif %}
+        {% if property.hipoteke %}<tr><td class="label">Hipoteke</td><td class="value">{{ property.hipoteke }}</td></tr>{% endif %}
+        {% if property.troskovi_odrzavanja %}<tr><td class="label">Tr. održavanja (god.)</td><td class="value">{{ property.troskovi_odrzavanja | currency }}</td></tr>{% endif %}
+        {% if property.amortizacija %}<tr><td class="label">Amortizacija</td><td class="value">{{ property.amortizacija | currency }}</td></tr>{% endif %}
+        {% if property.nabavna_cijena %}<tr><td class="label">Nabavna cijena</td><td class="value">{{ property.nabavna_cijena | currency }}</td></tr>{% endif %}
+        {% if property.trzisna_vrijednost %}<tr><td class="label">Tržišna vrijednost</td><td class="value">{{ property.trzisna_vrijednost | currency }}</td></tr>{% endif %}
+      </table>
+    </div>
+
+    <h2 class="section-title">Financijski pregled</h2>
+    <table class="kpi-grid">
+      <tr>
+        <td class="kpi--accent">
+          <p class="kpi__label">Tržišna vrijednost</p>
+          <div class="kpi__value">{{ totals.market_value | currency }}</div>
+          {% if property.nabavna_cijena %}<p class="kpi__sub">Nabavna {{ property.nabavna_cijena | currency }}</p>{% endif %}
+        </td>
+        <td class="kpi--positive">
+          <p class="kpi__label">Mjesečni prihod</p>
+          <div class="kpi__value">{{ totals.monthly_income | currency }}</div>
+          <p class="kpi__sub">{{ totals.active_contracts }} aktivnih ugovora</p>
+        </td>
+        <td class="kpi--info">
+          <p class="kpi__label">Godišnji prihod</p>
+          <div class="kpi__value">{{ totals.annual_income | currency }}</div>
+        </td>
+        <td>
+          <p class="kpi__label">Bruto prinos</p>
+          <div class="kpi__value">{{ totals.yield_pct | number(1) }} %</div>
+          <p class="kpi__sub">na tržišnu vrijednost</p>
+        </td>
+      </tr>
+    </table>
+
+    <h2 class="section-title">Popunjenost</h2>
+    <div class="occ-row">
+      <span>
+        <strong style="font-size:13pt;color:var(--color-primary);">{{ totals.occupancy_pct | number(0) }} %</strong>
+        {% if totals.total_units > 0 %}<span class="text-muted">· {{ totals.occupied_units }} / {{ totals.total_units }} jedinica</span>{% endif %}
+      </span>
+      <span class="text-muted">{{ totals.occupied_area | number(0) }} / {{ totals.total_area | number(0) }} m²</span>
+    </div>
+    <div class="occ-bar {% if totals.occupancy_pct < 40 %}danger{% elif totals.occupancy_pct < 75 %}warn{% endif %}">
+      <span style="width:{{ totals.occupancy_pct | clamp_pct }}%;"></span>
+    </div>
+
+    {% if units and units|length > 0 %}
+    <h2 class="section-title">Podprostori ({{ units|length }})</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Oznaka</th>
+          <th>Naziv</th>
+          <th>Kat</th>
+          <th class="num">Površina</th>
+          <th class="num">Zakupnina</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in units %}
+        <tr>
+          <td class="fw-semibold">{{ u.oznaka }}</td>
+          <td>{{ u.naziv or "—" }}</td>
+          <td>{{ u.kat or "—" }}</td>
+          <td class="num">{{ u.povrsina_m2 | number(0) }} m²</td>
+          <td class="num">{% if u.osnovna_zakupnina %}{{ u.osnovna_zakupnina | currency }}{% else %}—{% endif %}</td>
+          <td><span class="pill pill-{{ u.status_pill_class }}">{{ u.status_label }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if parkings and parkings|length > 0 %}
+    <h2 class="section-title">Parkirna mjesta ({{ parkings|length }})</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Oznaka</th>
+          <th>Etaža</th>
+          <th>Naziv</th>
+          <th class="num">Zakupnina</th>
+          <th>Registracije</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in parkings %}
+        <tr>
+          <td class="fw-semibold">{{ p.internal_id }}</td>
+          <td>{{ p.floor }}</td>
+          <td>{{ p.naziv or "—" }}</td>
+          <td class="num">{% if p.osnovna_zakupnina %}{{ p.osnovna_zakupnina | currency }}{% else %}—{% endif %}</td>
+          <td>{% if p.vehicle_plates %}{{ p.vehicle_plates | join(", ") }}{% else %}—{% endif %}</td>
+          <td><span class="pill pill-{{ p.status_pill_class }}">{{ p.status_label }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if contracts and contracts|length > 0 %}
+    <h2 class="section-title">Aktivni ugovori ({{ contracts|length }})</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Oznaka</th>
+          <th>Zakupnik</th>
+          <th>Početak</th>
+          <th>Završetak</th>
+          <th class="num">Mj. zakupnina</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in contracts %}
+        <tr>
+          <td class="fw-semibold">{{ c.interna_oznaka or "—" }}</td>
+          <td>{{ c.zakupnik_naziv }}</td>
+          <td>{{ c.datum_pocetka | fdate }}</td>
+          <td>{{ c.datum_zavrsetka | fdate }}</td>
+          <td class="num fw-semibold">{{ c.osnovna_zakupnina | currency }}</td>
+          <td><span class="pill pill-{{ c.status_pill_class }}">{{ c.status_label }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if property.napomene %}
+    <h2 class="section-title">Napomene</h2>
+    <div class="notes-box">{{ property.napomene }}</div>
+    {% endif %}
+
+    {% if property.potrebna_ulaganja %}
+    <h2 class="section-title">Potrebna ulaganja</h2>
+    <div class="notes-box">{{ property.potrebna_ulaganja }}</div>
+    {% endif %}
+  </body>
+</html>

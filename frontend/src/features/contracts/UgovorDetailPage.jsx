@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -64,12 +64,16 @@ import {
   formatApprovalStatus,
 } from "../../shared/formatters";
 import { getUnitDisplayName } from "../../shared/units";
+import { getParkingDisplayName } from "../../shared/parking";
 import { useAuth } from "../../shared/auth";
 import UgovorForm from "./UgovorForm";
-import ContractPrintTemplate from "./ContractPrintTemplate";
-import { generatePdf } from "../../shared/pdfGenerator";
+import {
+  downloadPdfFromResponse,
+  extractBlobErrorDetail,
+} from "../../shared/downloadBlob";
 import { Textarea } from "../../components/ui/textarea";
 import { toast } from "../../components/ui/sonner";
+import PageBreadcrumbs from "../../components/PageBreadcrumbs";
 
 const UgovorDetailPage = () => {
   const { id } = useParams();
@@ -101,9 +105,9 @@ const UgovorDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [documents, setDocuments] = useState([]);
+  const [parkingsForProperty, setParkingsForProperty] = useState([]);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectComment, setRejectComment] = useState("");
-  const printRef = useRef();
 
   // Load contract
   useEffect(() => {
@@ -128,19 +132,21 @@ const UgovorDetailPage = () => {
     loadData();
   }, [id, ugovori]);
 
-  // Fetch documents for this contract
+  // Fetch documents for this contract. Exposed as a stable callback so the
+  // edit flow can re-sync after the form uploads a new PDF attachment.
+  const fetchContractDocuments = React.useCallback(async (contractId) => {
+    if (!contractId) return;
+    try {
+      const res = await api.getDokumentiUgovora(contractId);
+      setDocuments(res.data || []);
+    } catch (err) {
+      console.error("Failed to fetch contract documents", err);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!contract) return;
-    const fetchDocs = async () => {
-      try {
-        const res = await api.getDokumentiUgovora(contract.id);
-        setDocuments(res.data || []);
-      } catch (err) {
-        console.error("Failed to fetch contract documents", err);
-      }
-    };
-    fetchDocs();
-  }, [contract?.id]);
+    if (contract?.id) fetchContractDocuments(contract.id);
+  }, [contract?.id, fetchContractDocuments]);
 
   // Derived data
   const property = useMemo(
@@ -155,6 +161,51 @@ const UgovorDetailPage = () => {
     () => propertyUnits?.find((u) => u.id === contract?.property_unit_id),
     [propertyUnits, contract?.property_unit_id],
   );
+  // Multi-unit: prefer the M2M `property_unit_ids` if present, fall back
+  // to the legacy single primary unit so older contracts still render.
+  const contractUnits = useMemo(() => {
+    if (!propertyUnits) return [];
+    const ids =
+      Array.isArray(contract?.property_unit_ids) && contract.property_unit_ids.length
+        ? contract.property_unit_ids
+        : contract?.property_unit_id
+          ? [contract.property_unit_id]
+          : [];
+    return ids
+      .map((id) => propertyUnits.find((u) => u.id === id))
+      .filter(Boolean);
+  }, [propertyUnits, contract?.property_unit_ids, contract?.property_unit_id]);
+
+  // Parking spaces are not in the entity store — fetch on demand for the
+  // contract's nekretnina.
+  useEffect(() => {
+    if (!contract?.nekretnina_id) {
+      setParkingsForProperty([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.getParking(contract.nekretnina_id);
+        if (!cancelled) setParkingsForProperty(res.data || []);
+      } catch (err) {
+        console.error("Failed to fetch parking for contract:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [contract?.nekretnina_id]);
+
+  const contractParkings = useMemo(() => {
+    const ids = Array.isArray(contract?.parking_ids)
+      ? contract.parking_ids
+      : [];
+    if (!ids.length) return [];
+    return ids
+      .map((id) => parkingsForProperty.find((p) => p.id === id))
+      .filter(Boolean);
+  }, [parkingsForProperty, contract?.parking_ids]);
 
   // Contract duration and timeline
   const timeline = useMemo(() => {
@@ -217,18 +268,18 @@ const UgovorDetailPage = () => {
     return monthly * months;
   }, [contract]);
 
-  // Print handler
+  // Server-rendered branded PDF (WeasyPrint + Jinja). No client-side
+  // fallback — if the server can't render a real PDF, we surface the
+  // error rather than silently producing a screenshot.
   const handlePrint = async () => {
-    if (!printRef.current) return;
+    const filename = `ugovor_${contract.interna_oznaka || contract.id}.pdf`;
     try {
-      await generatePdf(
-        printRef.current,
-        `ugovor_${contract.interna_oznaka || contract.id}_${new Date().toISOString().split("T")[0]}`,
-        "landscape",
-      );
-      toast.success("PDF generiran");
+      const response = await api.exportUgovorPdf(contract.id);
+      downloadPdfFromResponse(response, filename);
+      toast.success("PDF preuzet.");
     } catch (error) {
-      toast.error("Greška pri generiranju PDF-a");
+      const detail = await extractBlobErrorDetail(error);
+      toast.error(detail);
     }
   };
 
@@ -236,6 +287,9 @@ const UgovorDetailPage = () => {
   const handleEditSuccess = () => {
     setIsEditOpen(false);
     refresh();
+    // The form may have attached a new PDF; re-sync the documents list so
+    // the user immediately sees the upload on the detail page.
+    if (contract?.id) fetchContractDocuments(contract.id);
   };
 
   // Approval handlers
@@ -317,24 +371,12 @@ const UgovorDetailPage = () => {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6">
-      {/* Off-screen print template */}
-      <div className="absolute top-0 left-[-9999px] -z-50">
-        <ContractPrintTemplate
-          ref={printRef}
-          contracts={[
-            {
-              ...contract,
-              zakupnik_naziv:
-                contract.zakupnik_naziv ||
-                tenant?.naziv_firme ||
-                tenant?.ime_prezime ||
-                "Nepoznat",
-            },
-          ]}
-          nekretnine={nekretnine}
-          zakupnici={zakupnici}
-        />
-      </div>
+      <PageBreadcrumbs
+        items={[
+          { label: "Ugovori", to: "/ugovori" },
+          { label: contract.interna_oznaka || "Bez oznake" },
+        ]}
+      />
 
       {/* Header */}
       <div className="flex items-start justify-between">
@@ -388,9 +430,14 @@ const UgovorDetailPage = () => {
                 >
                   <Building className="h-3.5 w-3.5" />
                   {property.naziv}
-                  {unit && (
+                  {contractUnits.length === 1 && (
                     <span className="text-primary font-medium">
-                      / {getUnitDisplayName(unit)}
+                      / {getUnitDisplayName(contractUnits[0])}
+                    </span>
+                  )}
+                  {contractUnits.length > 1 && (
+                    <span className="text-primary font-medium">
+                      / {contractUnits.length} jedinica
                     </span>
                   )}
                 </Link>
@@ -580,13 +627,31 @@ const UgovorDetailPage = () => {
                     <span className="font-medium">—</span>
                   )}
                 </div>
-                {unit && (
+                {contractUnits.length > 0 && (
                   <div>
                     <span className="text-muted-foreground block mb-1">
-                      Jedinica
+                      {contractUnits.length === 1
+                        ? "Jedinica"
+                        : `Jedinice (${contractUnits.length})`}
                     </span>
                     <span className="font-medium">
-                      {getUnitDisplayName(unit)}
+                      {contractUnits
+                        .map((u) => getUnitDisplayName(u))
+                        .join(", ")}
+                    </span>
+                  </div>
+                )}
+                {contractParkings.length > 0 && (
+                  <div>
+                    <span className="text-muted-foreground block mb-1">
+                      {contractParkings.length === 1
+                        ? "Parkirno mjesto"
+                        : `Parkirna mjesta (${contractParkings.length})`}
+                    </span>
+                    <span className="font-medium">
+                      {contractParkings
+                        .map((p) => getParkingDisplayName(p))
+                        .join(", ")}
                     </span>
                   </div>
                 )}

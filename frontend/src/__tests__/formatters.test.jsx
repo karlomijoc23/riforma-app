@@ -9,7 +9,6 @@ import {
   formatContractDate,
   formatDateTime,
   formatBooleanish,
-  pdfDateStamp,
   formatPropertyType,
 } from "../shared/formatters";
 
@@ -250,21 +249,6 @@ describe("formatBooleanish", () => {
 
   it("returns the value as-is for unrecognized strings", () => {
     expect(formatBooleanish("Mozda")).toBe("Mozda");
-  });
-});
-
-describe("pdfDateStamp", () => {
-  it("returns a string in dd.mm.yy format", () => {
-    const result = pdfDateStamp();
-    expect(result).toMatch(/^\d{2}\.\d{2}\.\d{2}$/);
-  });
-
-  it("matches the current date", () => {
-    const now = new Date();
-    const dd = now.getDate().toString().padStart(2, "0");
-    const mm = (now.getMonth() + 1).toString().padStart(2, "0");
-    const yy = now.getFullYear().toString().slice(-2);
-    expect(pdfDateStamp()).toBe(`${dd}.${mm}.${yy}`);
   });
 });
 

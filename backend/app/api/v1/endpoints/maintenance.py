@@ -14,6 +14,7 @@ from app.db.repositories.instance import (
 from app.models.domain import MaintenancePriority, MaintenanceStatus
 from app.models.tables import MaintenanceTaskRow, NekretnineRow
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import Response as FastAPIResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -23,7 +24,13 @@ class MaintenanceTaskCreate(BaseModel):
     naziv: str = Field(max_length=200)
     opis: Optional[str] = Field(default=None, max_length=5000)
     nekretnina_id: Optional[str] = Field(default=None, max_length=100)
+    # Legacy single-unit pointer (kept as the "primary" so reports + recurring
+    # children keep working). If `property_unit_ids` is also given, the two
+    # are merged with `property_unit_id` becoming the first/primary entry.
     property_unit_id: Optional[str] = Field(default=None, max_length=100)
+    # Full M:N unit set for tasks that cover multiple units (e.g. "paint
+    # hallway A2 + A3"). Empty / None means "single primary unit" (legacy).
+    property_unit_ids: Optional[List[str]] = None
     ugovor_id: Optional[str] = Field(default=None, max_length=100)
     prijavio_user_id: Optional[str] = Field(default=None, max_length=100)
     dodijeljeno_user_id: Optional[str] = Field(default=None, max_length=100)
@@ -59,6 +66,8 @@ class MaintenanceTaskUpdate(BaseModel):
     opis: Optional[str] = Field(default=None, max_length=5000)
     nekretnina_id: Optional[str] = Field(default=None, max_length=100)
     property_unit_id: Optional[str] = Field(default=None, max_length=100)
+    # Replace the M:N set when present. None / unset means "leave alone".
+    property_unit_ids: Optional[List[str]] = None
     ugovor_id: Optional[str] = Field(default=None, max_length=100)
     dodijeljeno_user_id: Optional[str] = Field(default=None, max_length=100)
     prijavio: Optional[str] = Field(default=None, max_length=200)
@@ -92,6 +101,164 @@ RECURRENCE_DELTAS = {
     "polugodisnje": timedelta(days=182),
     "godisnje": timedelta(days=365),
 }
+
+
+# ---------------------------------------------------------------------------
+# M:N helpers — mirror of ugovor_units helpers in contracts.py. Reuse same
+# transactional pattern so junction inserts can run in the caller's session.
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_task_unit_ids(item_data: dict) -> List[str]:
+    """Combine legacy `property_unit_id` and new `property_unit_ids` into a
+    deduplicated, ordered list. The first element (if any) becomes the
+    "primary" unit stored on the task row. Validates each unit exists and
+    belongs to the task's nekretnina."""
+    unit_ids: List[str] = []
+    primary = item_data.get("property_unit_id")
+    if primary:
+        unit_ids.append(primary)
+    for uid in item_data.get("property_unit_ids") or []:
+        if uid and uid not in unit_ids:
+            unit_ids.append(uid)
+
+    if not unit_ids:
+        return []
+
+    nekretnina_id = item_data.get("nekretnina_id")
+    for uid in unit_ids:
+        unit = await property_units.get_by_id(uid)
+        if not unit:
+            raise HTTPException(
+                status_code=400, detail=f"Podprostor '{uid}' ne postoji."
+            )
+        if nekretnina_id and unit.nekretnina_id != nekretnina_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Podprostor '{unit.oznaka or uid}' ne pripada"
+                    " odabranoj nekretnini."
+                ),
+            )
+    return unit_ids
+
+
+async def _set_task_units(
+    task_id: str,
+    unit_ids: List[str],
+    *,
+    session=None,
+) -> None:
+    """Replace junction rows for a task. Reuses caller session when
+    provided so junction inserts roll back with the task row."""
+    from app.db.session import get_async_session_factory
+    from app.models.tables import maintenance_task_units as _junction
+    from sqlalchemy import delete as _delete, insert as _insert
+
+    async def _do(s):
+        await s.execute(
+            _delete(_junction).where(_junction.c.maintenance_task_id == task_id)
+        )
+        if unit_ids:
+            await s.execute(
+                _insert(_junction),
+                [
+                    {"maintenance_task_id": task_id, "property_unit_id": uid}
+                    for uid in unit_ids
+                ],
+            )
+
+    if session is not None:
+        await _do(session)
+        return
+
+    session_factory = get_async_session_factory()
+    async with session_factory() as own_session:
+        async with own_session.begin():
+            await _do(own_session)
+
+
+async def _get_task_unit_ids(task_id: str) -> List[str]:
+    """Return all unit ids linked to the task via the junction."""
+    from app.db.session import get_async_session_factory
+    from app.models.tables import maintenance_task_units as _junction
+    from sqlalchemy import select as _select
+
+    session_factory = get_async_session_factory()
+    async with session_factory() as session:
+        result = await session.execute(
+            _select(_junction.c.property_unit_id).where(
+                _junction.c.maintenance_task_id == task_id
+            )
+        )
+        return [row[0] for row in result.all()]
+
+
+async def _apply_unit_changes(
+    task_id: str,
+    existing,
+    update_data: dict,
+) -> List[str]:
+    """Shared by PUT + PATCH: detect unit set changes in the update payload,
+    resolve the new full set, sync the junction, and return the new ids.
+
+    Mutates `update_data` in place: removes `property_unit_ids`, sets
+    `property_unit_id` to the new primary (first of the set or None).
+    """
+    if (
+        "property_unit_id" not in update_data
+        and "property_unit_ids" not in update_data
+    ):
+        # No unit-related change requested — leave the existing junction.
+        current = await _get_task_unit_ids(task_id)
+        if existing.property_unit_id and existing.property_unit_id not in current:
+            current = [existing.property_unit_id] + current
+        return current
+
+    merged = {
+        "nekretnina_id": update_data.get(
+            "nekretnina_id", existing.nekretnina_id
+        ),
+        "property_unit_id": update_data.get(
+            "property_unit_id", existing.property_unit_id
+        ),
+        "property_unit_ids": update_data.get("property_unit_ids"),
+    }
+    new_unit_ids = await _resolve_task_unit_ids(merged)
+    update_data["property_unit_id"] = new_unit_ids[0] if new_unit_ids else None
+    update_data.pop("property_unit_ids", None)
+
+    await _set_task_units(task_id, new_unit_ids)
+    return new_unit_ids
+
+
+async def _enrich_with_unit_ids(items_dicts: List[dict], task_ids: List[str]) -> None:
+    """Batch-load junction rows for a list of tasks and attach
+    `property_unit_ids` to each dict. Includes the legacy primary FK if
+    not already present so callers get the complete set."""
+    if not task_ids:
+        return
+    from app.db.session import get_async_session_factory
+    from app.models.tables import maintenance_task_units as _junction
+    from sqlalchemy import select as _select
+
+    session_factory = get_async_session_factory()
+    async with session_factory() as session:
+        result = await session.execute(
+            _select(
+                _junction.c.maintenance_task_id, _junction.c.property_unit_id
+            ).where(_junction.c.maintenance_task_id.in_(task_ids))
+        )
+        by_task: Dict[str, List[str]] = {}
+        for tid, uid in result.all():
+            by_task.setdefault(tid, []).append(uid)
+
+    for d in items_dicts:
+        junction_ids = by_task.get(d.get("id"), [])
+        primary = d.get("property_unit_id")
+        if primary and primary not in junction_ids:
+            junction_ids.insert(0, primary)
+        d["property_unit_ids"] = junction_ids
 
 
 @router.get("", dependencies=[Depends(deps.require_scopes("maintenance:read"))])
@@ -154,7 +321,9 @@ async def get_maintenance_tasks(
         limit=limit,
     )
     response.headers["X-Total-Count"] = str(total)
-    return [maintenance_tasks.to_dict(item) for item in items]
+    results = [maintenance_tasks.to_dict(item) for item in items]
+    await _enrich_with_unit_ids(results, [item.id for item in items])
+    return results
 
 
 @router.get(
@@ -255,6 +424,30 @@ async def get_maintenance_analytics(
         "by_priority": by_priority_out,
         "by_month": by_month_out,
     }
+
+
+@router.get(
+    "/report/export-pdf",
+    dependencies=[Depends(deps.require_scopes("maintenance:read"))],
+)
+async def export_maintenance_report_pdf(
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Server-side PDF of the maintenance overview report."""
+    from app.services.maintenance_report_pdf_service import (
+        render_maintenance_report_pdf,
+    )
+
+    pdf_bytes = await render_maintenance_report_pdf()
+    return FastAPIResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="riforma-izvjestaj-odrzavanja.pdf"'
+            ),
+        },
+    )
 
 
 @router.get(
@@ -362,15 +555,17 @@ async def create_maintenance_task(
             )
         if not item_data.get("nekretnina_id"):
             item_data["nekretnina_id"] = contract.nekretnina_id
-        if not item_data.get("property_unit_id"):
+        if (
+            not item_data.get("property_unit_id")
+            and not item_data.get("property_unit_ids")
+        ):
             item_data["property_unit_id"] = contract.property_unit_id
 
-    if item_data.get("property_unit_id") and item_data.get("nekretnina_id"):
-        unit = await property_units.get_by_id(item_data["property_unit_id"])
-        if unit and unit.nekretnina_id != item_data["nekretnina_id"]:
-            raise HTTPException(
-                status_code=400, detail="Podprostor ne pripada odabranoj nekretnini"
-            )
+    # Resolve full unit list (legacy + M:N payload merged & validated).
+    unit_ids = await _resolve_task_unit_ids(item_data)
+    primary_unit = unit_ids[0] if unit_ids else None
+    item_data["property_unit_id"] = primary_unit
+    item_data.pop("property_unit_ids", None)
 
     # Relax assignee role check — allow any active user
     if item_data.get("dodijeljeno_user_id"):
@@ -380,9 +575,15 @@ async def create_maintenance_task(
                 status_code=400, detail="Dodijeljeni korisnik nije pronađen"
             )
 
-    new_item = await maintenance_tasks.create(item_data)
+    from app.db.transaction import db_transaction
 
-    # If recurring, create future instances
+    async with db_transaction() as txn:
+        new_item = await maintenance_tasks.create(item_data, session=txn)
+        if unit_ids:
+            await _set_task_units(new_item.id, unit_ids, session=txn)
+
+    # If recurring, create future instances (each child gets the SAME unit
+    # set as the parent via the junction so multi-unit tasks recur cleanly).
     recurrence = item_in.ponavljanje
     if recurrence and recurrence in RECURRENCE_DELTAS and item_in.rok:
         parent_id = new_item.id
@@ -396,6 +597,8 @@ async def create_maintenance_task(
             child_data["rok"] = next_date
             child_data["parent_task_id"] = parent_id
             child_data["ponavljanje"] = None  # Children don't recurse
+            child_data["property_unit_id"] = primary_unit
+            child_data.pop("property_unit_ids", None)
             child_data["aktivnosti"] = [
                 {
                     "tip": "kreiran",
@@ -404,10 +607,15 @@ async def create_maintenance_task(
                     "timestamp": date.today().isoformat(),
                 }
             ]
-            await maintenance_tasks.create(child_data)
+            async with db_transaction() as txn:
+                child = await maintenance_tasks.create(child_data, session=txn)
+                if unit_ids:
+                    await _set_task_units(child.id, unit_ids, session=txn)
             next_date += delta
 
-    return maintenance_tasks.to_dict(new_item)
+    result = maintenance_tasks.to_dict(new_item)
+    result["property_unit_ids"] = unit_ids
+    return result
 
 
 @router.get("/{id}", dependencies=[Depends(deps.require_scopes("maintenance:read"))])
@@ -418,7 +626,12 @@ async def get_maintenance_task(
     item = await maintenance_tasks.get_by_id(id)
     if not item:
         raise HTTPException(status_code=404, detail="Zadatak nije pronađen")
-    return maintenance_tasks.to_dict(item)
+    result = maintenance_tasks.to_dict(item)
+    junction_ids = await _get_task_unit_ids(id)
+    if item.property_unit_id and item.property_unit_id not in junction_ids:
+        junction_ids.insert(0, item.property_unit_id)
+    result["property_unit_ids"] = junction_ids
+    return result
 
 
 @router.put(
@@ -441,8 +654,12 @@ async def update_maintenance_task(
     if not update_data:
         return maintenance_tasks.to_dict(existing)
 
+    new_unit_ids = await _apply_unit_changes(id, existing, update_data)
+
     updated = await maintenance_tasks.update_by_id(id, update_data)
-    return maintenance_tasks.to_dict(updated)
+    result = maintenance_tasks.to_dict(updated)
+    result["property_unit_ids"] = new_unit_ids
+    return result
 
 
 @router.patch(
@@ -477,8 +694,12 @@ async def patch_maintenance_task(
         activities.append(activity)
         update_data["aktivnosti"] = activities
 
+    new_unit_ids = await _apply_unit_changes(id, existing, update_data)
+
     updated = await maintenance_tasks.update_by_id(id, update_data)
-    return maintenance_tasks.to_dict(updated)
+    result = maintenance_tasks.to_dict(updated)
+    result["property_unit_ids"] = new_unit_ids
+    return result
 
 
 @router.delete(

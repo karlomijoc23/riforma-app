@@ -157,6 +157,20 @@ export const normaliseNekretninaPayload = (formPayload = {}) => {
   return { property, units };
 };
 
+/**
+ * True if the contract covers `unitId`, looking at BOTH the legacy
+ * single-FK (`property_unit_id`) AND the M2M array (`property_unit_ids`).
+ * Backend list endpoint now sends both, so this works on listing pages.
+ */
+export const contractCoversUnit = (contract, unitId) => {
+  if (!contract || !unitId) return false;
+  if (contract.property_unit_id === unitId) return true;
+  if (Array.isArray(contract.property_unit_ids)) {
+    return contract.property_unit_ids.includes(unitId);
+  }
+  return false;
+};
+
 export const resolveUnitTenantName = (unit, tenantsById) => {
   if (!unit?.zakupnik_id) {
     return "—";

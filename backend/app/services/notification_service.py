@@ -1,34 +1,94 @@
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from html import escape
+from typing import List
+
+from sqlalchemy import or_
 
 from app.core.email import send_email
-from app.db.repositories.instance import ugovori, racuni, maintenance_tasks, users
-from app.models.tables import UgovoriRow, RacuniRow, MaintenanceTaskRow, UserRow
+from app.core.time import local_today
+from app.db.repositories.instance import (
+    maintenance_tasks,
+    racuni,
+    tenant_memberships,
+    ugovori,
+    users,
+)
+from app.db.tenant import CURRENT_TENANT_ID
+from app.models.tables import (
+    MaintenanceTaskRow,
+    RacuniRow,
+    TenantMembershipRow,
+    UgovoriRow,
+    UserRow,
+)
 
 logger = logging.getLogger(__name__)
 
+# Don't re-notify the same row more than once per this window.
+NOTIFICATION_COOLDOWN_DAYS = 7
+
+
+def _cooldown_cutoff() -> datetime:
+    return datetime.now(timezone.utc) - timedelta(days=NOTIFICATION_COOLDOWN_DAYS)
+
+
+async def _recipients_for_current_tenant(allowed_roles: List[str]) -> List[UserRow]:
+    """Return only users who are MEMBERS of the current scheduler-tenant
+    AND have one of the allowed roles. Without this filter the old code
+    blasted notifications to every admin in the entire SaaS install
+    regardless of portfolio.
+    """
+    tenant_id = CURRENT_TENANT_ID.get(None)
+    if not tenant_id:
+        return []
+
+    membership_rows = await tenant_memberships.find_all(
+        filters={"tenant_id": tenant_id, "status": "active"}
+    )
+    member_user_ids = [m.user_id for m in membership_rows]
+    if not member_user_ids:
+        return []
+
+    return await users.find_all(
+        extra_conditions=[
+            UserRow.id.in_(member_user_ids),
+            UserRow.role.in_(allowed_roles),
+            UserRow.active.is_(True),
+        ]
+    )
+
 
 async def notify_expiring_contracts():
-    """Send notifications for contracts expiring within 30 days."""
-    today = date.today()
+    """Send notifications for contracts expiring within 30 days.
+
+    Only contracts whose `last_expiry_notified_at` is null or older than
+    the cooldown window are considered. After a successful send, the
+    timestamp is updated so the next scheduler tick skips them.
+    """
+    today = local_today()
     warning_date = (today + timedelta(days=30)).isoformat()
     today_str = today.isoformat()
+    cutoff = _cooldown_cutoff()
 
     expiring = await ugovori.find_all(extra_conditions=[
         UgovoriRow.status.in_(["aktivno", "na_isteku"]),
         UgovoriRow.datum_zavrsetka >= today_str,
         UgovoriRow.datum_zavrsetka <= warning_date,
+        or_(
+            UgovoriRow.last_expiry_notified_at.is_(None),
+            UgovoriRow.last_expiry_notified_at < cutoff,
+        ),
     ])
 
     if not expiring:
         logger.info("No expiring contracts to notify about.")
         return
 
-    # Get admin users for notification
-    admins = await users.find_all(extra_conditions=[
-        UserRow.role.in_(["owner", "admin"]),
-    ])
+    # Recipients are admins of THIS tenant only (scheduler runs the loop
+    # per-tenant, so CURRENT_TENANT_ID is set). Without this filter every
+    # SaaS-wide admin gets emails about portfolios they don't own.
+    admins = await _recipients_for_current_tenant(["owner", "admin"])
 
     _td = "padding:8px;border-bottom:1px solid #e2e8f0"
     _hdr_s = "background:#1e293b;color:white;padding:20px;" "border-radius:8px 8px 0 0"
@@ -88,22 +148,38 @@ async def notify_expiring_contracts():
             html,
         )
 
+    # Stamp every contract that was just included in a notification batch
+    # so the cooldown window kicks in. Done AFTER the send loop so a
+    # transient SMTP failure doesn't suppress retries forever.
+    now = datetime.now(timezone.utc)
+    for c in expiring:
+        try:
+            await ugovori.update_by_id(c.id, {"last_expiry_notified_at": now})
+        except Exception:
+            logger.exception(
+                "Failed to stamp last_expiry_notified_at on contract %s", c.id
+            )
+
 
 async def notify_overdue_bills():
-    """Send notifications for overdue unpaid bills."""
-    today = date.today()
+    """Send notifications for overdue unpaid bills. Same cooldown logic
+    as `notify_expiring_contracts` — once notified, skip for 7 days."""
+    today = local_today()
+    cutoff = _cooldown_cutoff()
 
     overdue = await racuni.find_all(extra_conditions=[
         RacuniRow.status_placanja.in_(["ceka_placanje", "djelomicno_placeno"]),
         RacuniRow.datum_dospijeca < today,
+        or_(
+            RacuniRow.last_overdue_notified_at.is_(None),
+            RacuniRow.last_overdue_notified_at < cutoff,
+        ),
     ])
 
     if not overdue:
         return
 
-    admins = await users.find_all(extra_conditions=[
-        UserRow.role.in_(["owner", "admin", "accountant"]),
-    ])
+    admins = await _recipients_for_current_tenant(["owner", "admin", "accountant"])
 
     _td = "padding:8px;border-bottom:1px solid #e2e8f0"
     _hdr_r = "background:#dc2626;color:white;padding:20px;" "border-radius:8px 8px 0 0"
@@ -166,20 +242,28 @@ async def notify_overdue_bills():
         subj = f"Riforma: {len(overdue)} dospjelih" f" racuna ({total:.2f} EUR)"
         await send_email(email, subj, html)
 
+    # Mark every notified bill so the cooldown skips them next tick.
+    now = datetime.now(timezone.utc)
+    for b in overdue:
+        try:
+            await racuni.update_by_id(b.id, {"last_overdue_notified_at": now})
+        except Exception:
+            logger.exception(
+                "Failed to stamp last_overdue_notified_at on bill %s", b.id
+            )
+
 
 async def notify_maintenance_overdue():
     """Send notifications for overdue maintenance tasks."""
     overdue = await maintenance_tasks.find_all(extra_conditions=[
         MaintenanceTaskRow.status.in_(["novi", "u_tijeku", "planiran"]),
-        MaintenanceTaskRow.rok < date.today(),
+        MaintenanceTaskRow.rok < local_today(),
     ])
 
     if not overdue:
         return
 
-    admins = await users.find_all(extra_conditions=[
-        UserRow.role.in_(["owner", "admin", "manager"]),
-    ])
+    admins = await _recipients_for_current_tenant(["owner", "admin", "manager"])
 
     _td_m = "padding:8px;border-bottom:1px solid #e2e8f0"
     _hdr_m = "background:#f59e0b;color:white;padding:20px;" "border-radius:8px 8px 0 0"

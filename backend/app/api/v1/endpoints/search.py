@@ -10,6 +10,16 @@ from fastapi import APIRouter, Depends
 router = APIRouter()
 
 
+def _escape_like(value: str) -> str:
+    """Escape `%` and `_` (SQL LIKE wildcards) and `\\` (escape char) in a
+    user query so a single `%` doesn't match the entire tenant. Used with
+    `.ilike(pattern, escape="\\")` so the backend recognises the escape.
+    """
+    return (
+        value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
+
+
 @router.get("", dependencies=[Depends(deps.require_scopes("properties:read"))])
 async def search(
     q: str,
@@ -18,16 +28,22 @@ async def search(
     if not q:
         return {}
 
-    search_term = f"%{q}%"
+    # Cap input length so a malicious 50k-char query doesn't tie up the DB.
+    q = q.strip()[:200]
+    if not q:
+        return {}
+
+    safe = _escape_like(q)
+    search_term = f"%{safe}%"
 
     results = {}
 
     # Search properties
     props, _ = await nekretnine.find_many(
         extra_conditions=[or_(
-            NekretnineRow.naziv.ilike(search_term),
-            NekretnineRow.adresa.ilike(search_term),
-            NekretnineRow.katastarska_opcina.ilike(search_term),
+            NekretnineRow.naziv.ilike(search_term, escape="\\"),
+            NekretnineRow.adresa.ilike(search_term, escape="\\"),
+            NekretnineRow.katastarska_opcina.ilike(search_term, escape="\\"),
         )],
         limit=10,
     )
@@ -36,9 +52,9 @@ async def search(
     # Search tenants
     tenants, _ = await zakupnici.find_many(
         extra_conditions=[or_(
-            ZakupniciRow.naziv_firme.ilike(search_term),
-            ZakupniciRow.ime_prezime.ilike(search_term),
-            ZakupniciRow.oib.ilike(search_term),
+            ZakupniciRow.naziv_firme.ilike(search_term, escape="\\"),
+            ZakupniciRow.ime_prezime.ilike(search_term, escape="\\"),
+            ZakupniciRow.oib.ilike(search_term, escape="\\"),
         )],
         limit=10,
     )
@@ -47,8 +63,8 @@ async def search(
     # Search contracts
     contracts, _ = await ugovori.find_many(
         extra_conditions=[or_(
-            UgovoriRow.interna_oznaka.ilike(search_term),
-            UgovoriRow.napomena.ilike(search_term),
+            UgovoriRow.interna_oznaka.ilike(search_term, escape="\\"),
+            UgovoriRow.napomena.ilike(search_term, escape="\\"),
         )],
         limit=10,
     )

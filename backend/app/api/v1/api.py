@@ -18,6 +18,7 @@ from app.api.v1.endpoints import (
     racuni,
     saas_tenants,
     search,
+    self_service,
     settings,
     tenant_members,
     tenants,
@@ -66,3 +67,4 @@ api_router.include_router(
 )
 api_router.include_router(vendors.router, prefix="/dobavljaci", tags=["vendors"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
+api_router.include_router(self_service.router, prefix="/self", tags=["self-service"])

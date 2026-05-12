@@ -36,6 +36,7 @@ import { LinkPropertyDialog } from "./components/LinkPropertyDialog";
 import { EditProjectDialog } from "./components/EditProjectDialog";
 import ProjectGanttEngine from "./components/ProjectGanttEngine";
 import LegalChecklist from "./components/LegalChecklist";
+import PageBreadcrumbs from "../../components/PageBreadcrumbs";
 import {
   Table,
   TableBody,
@@ -147,6 +148,13 @@ export default function ProjectDetailsPage() {
 
   return (
     <div className="container mx-auto space-y-6 p-6">
+      <PageBreadcrumbs
+        items={[
+          { label: "Projekti", to: "/projekti" },
+          { label: project.name || "Detalji" },
+        ]}
+      />
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" asChild>

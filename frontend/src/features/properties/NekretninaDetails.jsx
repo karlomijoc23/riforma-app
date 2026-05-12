@@ -13,7 +13,6 @@ import {
   TabsTrigger,
 } from "../../components/ui/tabs";
 import { Badge } from "../../components/ui/badge";
-import ParkingTab from "./ParkingTab";
 import {
   Building,
   MapPin,
@@ -174,11 +173,6 @@ const NekretninaDetails = ({ nekretnina }) => {
           <TabsTrigger value="rizici" className="flex-1 min-w-[100px]">
             Napomene
           </TabsTrigger>
-          {nekretnina.has_parking && (
-            <TabsTrigger value="parking" className="flex-1 min-w-[100px]">
-              Parking
-            </TabsTrigger>
-          )}
         </TabsList>
 
         <TabsContent value="pregled" className="space-y-4 mt-4">
@@ -194,6 +188,21 @@ const NekretninaDetails = ({ nekretnina }) => {
                 <div className="text-2xl font-bold">
                   {formatArea(nekretnina.povrsina)}
                 </div>
+                {(nekretnina.povrsina_objekta ||
+                  nekretnina.povrsina_zemljista) && (
+                  <div className="mt-1 text-xs text-muted-foreground space-y-0.5">
+                    {nekretnina.povrsina_objekta ? (
+                      <div>
+                        Objekt: {formatArea(nekretnina.povrsina_objekta)}
+                      </div>
+                    ) : null}
+                    {nekretnina.povrsina_zemljista ? (
+                      <div>
+                        Zemljište: {formatArea(nekretnina.povrsina_zemljista)}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -249,9 +258,13 @@ const NekretninaDetails = ({ nekretnina }) => {
                   c.nekretnina_id === nekretnina.id &&
                   (c.status === "aktivno" || c.status === "na_isteku"),
               );
-              const activeUnitIds = new Set(
-                activeContracts.map((c) => c.property_unit_id).filter(Boolean),
-              );
+              const activeUnitIds = new Set();
+              activeContracts.forEach((c) => {
+                if (c.property_unit_id) activeUnitIds.add(c.property_unit_id);
+                if (Array.isArray(c.property_unit_ids)) {
+                  c.property_unit_ids.forEach((id) => activeUnitIds.add(id));
+                }
+              });
 
               const calculateOccupancy = (allUnits) => {
                 if (allUnits.length === 0)
@@ -599,11 +612,13 @@ const NekretninaDetails = ({ nekretnina }) => {
                   </TableHeader>
                   <TableBody>
                     {units.map((unit) => {
+                      const unitMatchId = unit.id || unit.localId;
                       const activeContract = ugovori?.find(
                         (c) =>
                           c.status === "aktivno" &&
-                          (c.property_unit_id === unit.id ||
-                            c.property_unit_id === unit.localId),
+                          (c.property_unit_id === unitMatchId ||
+                            (Array.isArray(c.property_unit_ids) &&
+                              c.property_unit_ids.includes(unitMatchId))),
                       );
                       const tenantName = activeContract
                         ? activeContract.zakupnik_naziv || "Nepoznat"
@@ -759,11 +774,6 @@ const NekretninaDetails = ({ nekretnina }) => {
           </div>
         </TabsContent>
 
-        {nekretnina.has_parking && (
-          <TabsContent value="parking" className="mt-4">
-            <ParkingTab nekretninaId={nekretnina.id} zakupnici={zakupnici} />
-          </TabsContent>
-        )}
       </Tabs>
     </div>
   );

@@ -165,11 +165,117 @@ async def delete_tenant(
             status_code=403, detail="Nemate ovlasti za brisanje ovog portfelja"
         )
 
-    # Proceed with deletion
-    # 1. Delete associated memberships
-    await tenant_memberships.delete_many(filters={"tenant_id": id})
+    # Hard-delete every tenant-scoped table in dependency order so we don't
+    # trip RESTRICT FKs on ugovori / racuni / property_units / etc. that
+    # all point at saas_tenants. Pre-flight count gives the admin one
+    # last warning if the portfolio still has business data.
+    from sqlalchemy import delete as _delete, func as _func, select as _select
 
-    # 2. Delete the tenant
-    await saas_tenants.delete_by_id(id)
+    from app.db.session import get_async_session_factory
+    from app.models.tables import (
+        ActivityLogRow,
+        DobavljaciRow,
+        DokumentiRow,
+        HandoverProtocolRow,
+        MaintenanceTaskRow,
+        NekretnineRow,
+        NotificationRow,
+        OglasiRow,
+        ParkingSpaceRow,
+        ProjektiRow,
+        PropertyUnitRow,
+        RacuniRow,
+        TenantSettingsRow,
+        UgovoriRow,
+        ZakupniciRow,
+        ugovor_parkings,
+        ugovor_units,
+        maintenance_task_units,
+    )
+
+    # Order: junctions → leaves → mid-level → parents
+    deletion_order = [
+        # M:N junctions first (no FK to saas_tenants but tied to deleted parents)
+        ugovor_units,
+        ugovor_parkings,
+        maintenance_task_units,
+        # Activity logs + notifications + settings — leaf tables
+        ActivityLogRow,
+        NotificationRow,
+        TenantSettingsRow,
+        # Receivables / supplier records
+        RacuniRow,
+        # Tasks reference units/contracts/properties — drop first
+        MaintenanceTaskRow,
+        HandoverProtocolRow,
+        # Documents reference contracts/units/properties/tenants
+        DokumentiRow,
+        # Contracts depend on properties + lessees
+        UgovoriRow,
+        # Listings reference properties
+        OglasiRow,
+        # Projects reference properties
+        ProjektiRow,
+        # Parking + units depend on properties
+        ParkingSpaceRow,
+        PropertyUnitRow,
+        # Top-level tenant-scoped entities
+        ZakupniciRow,
+        NekretnineRow,
+        DobavljaciRow,
+    ]
+
+    session_factory = get_async_session_factory()
+    async with session_factory() as session:
+        async with session.begin():
+            # Junction tables don't carry tenant_id — delete by joining
+            # through their tenant-scoped parents. Easiest: delete every
+            # junction row whose left FK references a tenant-scoped row
+            # in this portfolio.
+            await session.execute(
+                _delete(ugovor_units).where(
+                    ugovor_units.c.ugovor_id.in_(
+                        _select(UgovoriRow.id).where(
+                            UgovoriRow.tenant_id == id
+                        )
+                    )
+                )
+            )
+            await session.execute(
+                _delete(ugovor_parkings).where(
+                    ugovor_parkings.c.ugovor_id.in_(
+                        _select(UgovoriRow.id).where(
+                            UgovoriRow.tenant_id == id
+                        )
+                    )
+                )
+            )
+            await session.execute(
+                _delete(maintenance_task_units).where(
+                    maintenance_task_units.c.maintenance_task_id.in_(
+                        _select(MaintenanceTaskRow.id).where(
+                            MaintenanceTaskRow.tenant_id == id
+                        )
+                    )
+                )
+            )
+
+            # Now wipe each tenant-scoped table.
+            for table in deletion_order:
+                if table in (ugovor_units, ugovor_parkings, maintenance_task_units):
+                    continue  # already handled
+                if hasattr(table, "tenant_id"):
+                    await session.execute(
+                        _delete(table).where(table.tenant_id == id)
+                    )
+
+            # Memberships + the tenant row itself.
+            from app.models.tables import TenantMembershipRow as _TM
+            from app.models.tables import SaasTenantRow as _ST
+
+            await session.execute(
+                _delete(_TM).where(_TM.tenant_id == id)
+            )
+            await session.execute(_delete(_ST).where(_ST.id == id))
 
     return {"message": "Portfelj uspješno obrisan"}

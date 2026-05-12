@@ -1,6 +1,6 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { api } from "../../shared/api";
-import { formatCurrency, pdfDateStamp } from "../../shared/formatters";
+import { formatCurrency } from "../../shared/formatters";
 import {
   Loader2,
   Download,
@@ -57,9 +57,9 @@ const MjesecniIzvjestajPage = () => {
   const [mjesec, setMjesec] = useState(String(now.getMonth() + 1));
   const [godina, setGodina] = useState(String(now.getFullYear()));
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [report, setReport] = useState(null);
   const [metadata, setMetadata] = useState(null);
-  const reportRef = useRef(null);
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -91,100 +91,47 @@ const MjesecniIzvjestajPage = () => {
   };
 
   const handleDownloadPdf = useCallback(async () => {
-    const element = reportRef.current;
-    if (!element) return;
+    if (!report) return;
+    setDownloading(true);
     try {
-      toast.info("Generiranje PDF-a...");
-      const html2canvas = (await import("html2canvas")).default;
-      const jsPDF = (await import("jspdf")).default;
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        windowWidth: element.scrollWidth,
+      const res = await api.exportMonthlyReportPdf({
+        mjesec: parseInt(mjesec, 10),
+        godina: parseInt(godina, 10),
+        report,
+        source: metadata?.source,
       });
-      const pdf = new jsPDF({
-        orientation: "landscape",
-        unit: "mm",
-        format: "a4",
-      });
-      const pageWidth = 297;
-      const pageHeight = 210;
-      const margin = 8;
-      const usableWidth = pageWidth - margin * 2;
-      const usableHeight = pageHeight - margin * 2 - 6;
-      const imgWidth = usableWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-      if (imgHeight <= usableHeight) {
-        pdf.addImage(
-          canvas.toDataURL("image/png"),
-          "PNG",
-          margin,
-          margin,
-          imgWidth,
-          imgHeight,
-        );
-        pdf.setFontSize(7);
-        pdf.setTextColor(160);
-        pdf.text("Stranica 1 od 1", pageWidth / 2, pageHeight - 4, {
-          align: "center",
-        });
-      } else {
-        let yOffset = 0;
-        let page = 0;
-        const totalPages = Math.ceil(imgHeight / usableHeight);
-        while (yOffset < imgHeight) {
-          if (page > 0) pdf.addPage();
-          const sourceY = (yOffset / imgHeight) * canvas.height;
-          const sourceHeight = Math.min(
-            (usableHeight / imgHeight) * canvas.height,
-            canvas.height - sourceY,
-          );
-          const pageCanvas = document.createElement("canvas");
-          pageCanvas.width = canvas.width;
-          pageCanvas.height = sourceHeight;
-          const ctx = pageCanvas.getContext("2d");
-          ctx.drawImage(
-            canvas,
-            0,
-            sourceY,
-            canvas.width,
-            sourceHeight,
-            0,
-            0,
-            canvas.width,
-            sourceHeight,
-          );
-          const renderHeight = Math.min(usableHeight, imgHeight - yOffset);
-          pdf.addImage(
-            pageCanvas.toDataURL("image/png"),
-            "PNG",
-            margin,
-            margin,
-            imgWidth,
-            renderHeight,
-          );
-          pdf.setFontSize(7);
-          pdf.setTextColor(160);
-          pdf.text(
-            `Stranica ${page + 1} od ${totalPages}`,
-            pageWidth / 2,
-            pageHeight - 4,
-            { align: "center" },
-          );
-          yOffset += usableHeight;
-          page++;
-        }
-      }
-      pdf.save(`mjesecni-izvjestaj-${mjesec}-${godina}-${pdfDateStamp()}.pdf`);
-      toast.success("PDF uspješno generiran");
+      // Server returns application/pdf as a blob — trigger a browser download.
+      const blob = new Blob([res.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const monthPad = String(mjesec).padStart(2, "0");
+      a.href = url;
+      a.download = `riforma-mjesecni-izvjestaj-${godina}-${monthPad}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("PDF preuzet.");
     } catch (err) {
       console.error("PDF generation failed", err);
-      toast.error("Greška pri generiranju PDF-a");
+      // Blob responses bury error JSON inside the blob — read it out.
+      let detail = "Greška pri generiranju PDF-a.";
+      try {
+        const blob = err?.response?.data;
+        if (blob && blob.text) {
+          const text = await blob.text();
+          const parsed = JSON.parse(text);
+          detail = parsed?.detail || parsed?.message || detail;
+        }
+      } catch (_) {
+        /* fall through to default detail */
+      }
+      toast.error(detail);
+    } finally {
+      setDownloading(false);
     }
-  }, [mjesec, godina]);
+  }, [report, metadata, mjesec, godina]);
 
   const fin = report?.financijski_pregled;
   const occ = report?.popunjenost;
@@ -236,8 +183,18 @@ const MjesecniIzvjestajPage = () => {
               {loading ? "Generiranje..." : "Generiraj izvještaj"}
             </Button>
             {report && (
-              <Button variant="outline" size="sm" onClick={handleDownloadPdf}>
-                <Download className="mr-1 h-4 w-4" /> PDF
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadPdf}
+                disabled={downloading}
+              >
+                {downloading ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-1 h-4 w-4" />
+                )}
+                PDF
               </Button>
             )}
           </div>
@@ -271,7 +228,6 @@ const MjesecniIzvjestajPage = () => {
       {/* Report content */}
       {report && !loading && (
         <div
-          ref={reportRef}
           className="max-w-[1100px] mx-auto bg-white"
           style={{
             fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",

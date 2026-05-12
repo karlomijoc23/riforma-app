@@ -1,6 +1,10 @@
 import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { useEntityStore } from "../../shared/entityStore";
 import { api } from "../../shared/api";
+import {
+  downloadPdfFromResponse,
+  extractBlobErrorDetail,
+} from "../../shared/downloadBlob";
 import { Button } from "../../components/ui/button";
 import {
   Card,
@@ -130,27 +134,36 @@ export default function TenantStatementPage() {
   const grandTotal = totalRent + totalBills + totalCAM;
 
   const exportPdf = useCallback(async () => {
-    const el = document.getElementById("statement-content");
-    if (!el) return;
+    if (!selectedZakupnik) return;
     try {
-      const html2canvas = (await import("html2canvas")).default;
-      const { jsPDF } = await import("jspdf");
-      const canvas = await html2canvas(el, { scale: 2, useCORS: true });
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const w = pdf.internal.pageSize.getWidth();
-      const h = (canvas.height * w) / canvas.width;
-      pdf.addImage(imgData, "PNG", 0, 0, w, h);
-      const name =
+      // Build period_od / period_do for the selected month.
+      const periodOd = `${godina}-${String(mjesec + 1).padStart(2, "0")}-01`;
+      // Last day of month: day 0 of next month.
+      const lastDay = new Date(godina, mjesec + 1, 0).getDate();
+      const periodDo = `${godina}-${String(mjesec + 1).padStart(2, "0")}-${String(
+        lastDay,
+      ).padStart(2, "0")}`;
+
+      const res = await api.getTenantStatementPdf(
+        selectedZakupnik,
+        periodOd,
+        periodDo,
+      );
+      const name = (
         selectedZakupnikData?.naziv_firme ||
         selectedZakupnikData?.ime_prezime ||
-        "zakupnik";
-      pdf.save(`izvod_${name}_${MONTHS[mjesec]}_${godina}.pdf`);
-      toast.success("PDF izvoz uspješan");
+        "zakupnik"
+      ).replace(/[^a-zA-Z0-9_-]/g, "_");
+      downloadPdfFromResponse(
+        res,
+        `riforma-izvod-${name}-${MONTHS[mjesec]}-${godina}.pdf`,
+      );
+      toast.success("PDF preuzet.");
     } catch (err) {
-      toast.error("Greška pri izvozu PDF-a");
+      const detail = await extractBlobErrorDetail(err);
+      toast.error(detail);
     }
-  }, [selectedZakupnikData, mjesec, godina]);
+  }, [selectedZakupnik, selectedZakupnikData, mjesec, godina]);
 
   return (
     <div className="space-y-6 p-4 md:p-6 max-w-5xl mx-auto">

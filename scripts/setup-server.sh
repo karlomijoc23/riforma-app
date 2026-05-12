@@ -61,6 +61,10 @@ echo "[4/9] Creating directories..."
 mkdir -p "$INSTALL_DIR"/{backend,frontend,logs,backups,uploads}
 mkdir -p "$WEB_ROOT"
 chown -R "$RIFORMA_USER":"$RIFORMA_USER" "$INSTALL_DIR"
+# Uploads dir must stay writable by the service user — the systemd unit
+# only whitelists /opt/riforma/uploads in ReadWritePaths, and backend
+# UPLOAD_DIR in .env must match. Mismatch = silent 500 on upload.
+chmod 750 "$INSTALL_DIR/uploads"
 chown -R www-data:www-data "$WEB_ROOT"
 
 # 5. Setup MariaDB

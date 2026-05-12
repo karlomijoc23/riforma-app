@@ -36,7 +36,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../../components/ui/alert-dialog";
-import { Plus, Calendar, Archive, Pencil } from "lucide-react";
+import { Plus, Calendar, Archive, Pencil, Loader2 } from "lucide-react";
 import { api } from "../../shared/api";
 import { useEntityStore } from "../../shared/entityStore";
 import {
@@ -122,6 +122,7 @@ export const EMPTY_MAINTENANCE_FORM = {
   status: "novi",
   nekretnina_id: "",
   property_unit_id: "",
+  property_unit_ids: [],
   prijavio: "",
   dodijeljeno: "",
   rok: "",
@@ -338,6 +339,12 @@ const MaintenanceBoard = ({
 
   const handleEditClick = useCallback((task) => {
     setEditingTaskId(task.id);
+    const initialUnitIds =
+      Array.isArray(task.property_unit_ids) && task.property_unit_ids.length
+        ? task.property_unit_ids
+        : task.property_unit_id
+          ? [task.property_unit_id]
+          : [];
     setFormData({
       naziv: task.naziv || "",
       opis: task.opis || "",
@@ -345,6 +352,7 @@ const MaintenanceBoard = ({
       status: task.status || "novi",
       nekretnina_id: task.nekretnina_id || "none",
       property_unit_id: task.property_unit_id || "none",
+      property_unit_ids: initialUnitIds,
       prijavio: task.prijavio || "",
       dodijeljeno: task.dodijeljeno || "",
       rok: task.rok || "",
@@ -388,6 +396,9 @@ const MaintenanceBoard = ({
         status: formData.status,
         nekretnina_id: normaliseRelation(formData.nekretnina_id),
         property_unit_id: normaliseRelation(formData.property_unit_id),
+        property_unit_ids: Array.isArray(formData.property_unit_ids)
+          ? formData.property_unit_ids.filter(Boolean)
+          : [],
         prijavio: formData.prijavio.trim() || undefined,
         dodijeljeno: formData.dodijeljeno.trim() || undefined,
         rok: formData.rok || undefined,
@@ -676,7 +687,18 @@ const MaintenanceBoard = ({
         MAINTENANCE_PRIORITY_CONFIG[task.prioritet] ||
         MAINTENANCE_PRIORITY_CONFIG.srednje;
       const property = propertyMap[task.nekretnina_id];
-      const unit = propertyUnitsById?.[task.property_unit_id];
+      // Multi-unit aware: prefer the full M:N set if present, fall back to
+      // the legacy primary FK so older tasks still render correctly.
+      const taskUnitIds =
+        Array.isArray(task.property_unit_ids) && task.property_unit_ids.length
+          ? task.property_unit_ids
+          : task.property_unit_id
+            ? [task.property_unit_id]
+            : [];
+      const linkedUnits = taskUnitIds
+        .map((uid) => propertyUnitsById?.[uid])
+        .filter(Boolean);
+      const unit = linkedUnits[0];
       const dueDate = task.rok ? new Date(task.rok) : null;
       const validDueDate =
         dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate : null;
@@ -720,7 +742,11 @@ const MaintenanceBoard = ({
                 </CardTitle>
                 <p className="text-xs text-muted-foreground/80">
                   {property ? property.naziv : "Nepovezana nekretnina"}
-                  {unit ? ` • ${unit.naziv || unit.oznaka || unit.id}` : ""}
+                  {linkedUnits.length > 0
+                    ? ` • ${linkedUnits
+                        .map((u) => u.oznaka || u.naziv || u.id)
+                        .join(", ")}`
+                    : ""}
                 </p>
               </div>
               {!hideStatusBadge && (
@@ -1197,14 +1223,39 @@ const MaintenanceBoard = ({
                         </div>
                         <div>
                           <dt className="text-xs font-semibold uppercase text-muted-foreground">
-                            Jedinica
+                            {(() => {
+                              const ids = Array.isArray(
+                                selectedTask.property_unit_ids,
+                              )
+                                ? selectedTask.property_unit_ids
+                                : selectedTask.property_unit_id
+                                  ? [selectedTask.property_unit_id]
+                                  : [];
+                              return ids.length > 1 ? "Jedinice" : "Jedinica";
+                            })()}
                           </dt>
                           <dd className="font-medium text-foreground">
-                            {propertyUnitsById?.[selectedTask.property_unit_id]
-                              ?.naziv ||
-                              propertyUnitsById?.[selectedTask.property_unit_id]
-                                ?.oznaka ||
-                              "Nije odabrano"}
+                            {(() => {
+                              const ids = Array.isArray(
+                                selectedTask.property_unit_ids,
+                              )
+                                ? selectedTask.property_unit_ids
+                                : selectedTask.property_unit_id
+                                  ? [selectedTask.property_unit_id]
+                                  : [];
+                              if (!ids.length) return "Nije odabrano";
+                              return (
+                                ids
+                                  .map((uid) => {
+                                    const u = propertyUnitsById?.[uid];
+                                    return u
+                                      ? u.naziv || u.oznaka || uid
+                                      : null;
+                                  })
+                                  .filter(Boolean)
+                                  .join(", ") || "Nije odabrano"
+                              );
+                            })()}
                           </dd>
                         </div>
                         <div>
@@ -1636,6 +1687,7 @@ const MaintenanceBoard = ({
                       ...prev,
                       nekretnina_id: value === "none" ? "" : value,
                       property_unit_id: "",
+                      property_unit_ids: [],
                     }))
                   }
                 >
@@ -1653,38 +1705,57 @@ const MaintenanceBoard = ({
                 </Select>
               </div>
               <div>
-                <Label htmlFor="task-unit">Jedinica</Label>
-                <Select
-                  value={formData.property_unit_id || "none"}
-                  onValueChange={(value) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      property_unit_id: value === "none" ? "" : value,
-                    }))
-                  }
-                  disabled={
-                    !formData.nekretnina_id ||
-                    unitsForSelectedProperty.length === 0
-                  }
-                >
-                  <SelectTrigger id="task-unit">
-                    <SelectValue
-                      placeholder={
-                        formData.nekretnina_id
-                          ? "Odaberite jedinicu"
-                          : "Prvo odaberite nekretninu"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Bez jedinice</SelectItem>
-                    {unitsForSelectedProperty.map((unit) => (
-                      <SelectItem key={unit.id} value={unit.id}>
-                        {unit.oznaka || unit.naziv || unit.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>Jedinice</Label>
+                {!formData.nekretnina_id ||
+                unitsForSelectedProperty.length === 0 ? (
+                  <div className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+                    {formData.nekretnina_id
+                      ? "Nema jedinica."
+                      : "Prvo odaberite nekretninu."}
+                  </div>
+                ) : (
+                  <div className="rounded-md border max-h-32 overflow-y-auto divide-y">
+                    {unitsForSelectedProperty.map((unit) => {
+                      const checked = (
+                        formData.property_unit_ids || []
+                      ).includes(unit.id);
+                      return (
+                        <label
+                          key={unit.id}
+                          className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-muted/40"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={checked}
+                            onChange={() =>
+                              setFormData((prev) => {
+                                const current = prev.property_unit_ids || [];
+                                const next = current.includes(unit.id)
+                                  ? current.filter((id) => id !== unit.id)
+                                  : [...current, unit.id];
+                                return {
+                                  ...prev,
+                                  property_unit_ids: next,
+                                  property_unit_id: next[0] || "",
+                                };
+                              })
+                            }
+                          />
+                          <span className="flex-1">
+                            {unit.oznaka || unit.naziv || unit.id}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                {(formData.property_unit_ids || []).length > 1 && (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Odabrano: {formData.property_unit_ids.length} jedinica.
+                    Prva u redu = primarna.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1797,11 +1868,8 @@ const MaintenanceBoard = ({
                 Odustani
               </Button>
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting
-                  ? "Spremam…"
-                  : editingTaskId
-                    ? "Spremi promjene"
-                    : "Kreiraj nalog"}
+                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {editingTaskId ? "Spremi promjene" : "Kreiraj nalog"}
               </Button>
             </DialogFooter>
           </form>

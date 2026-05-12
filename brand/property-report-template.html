@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="hr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Izvještaj portfelja nekretnina</title>
+    {% include "partials/_base_styles.html" %}
+    <style>
+      /* Property report uses landscape A4 so the wide property table fits */
+      @page {
+        size: A4 landscape;
+        margin: 12mm 14mm 16mm 14mm;
+      }
+
+      .report-head { margin: -12mm -14mm 8mm -14mm; padding: 12mm 14mm 10mm 14mm; }
+
+      /* Vrsta nekretnine je samo tekstualna oznaka (bez "pilule"). */
+      .type-text {
+        font-size: 9pt;
+        color: var(--color-ink-soft);
+      }
+
+      .stripe {
+        height: 1.5mm;
+        border-radius: 1mm;
+        background: var(--color-subtle);
+        overflow: hidden;
+      }
+      .stripe__fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+      }
+
+      .type-summary-row td {
+        padding: 4mm 4mm;
+        vertical-align: middle;
+      }
+
+      .occupancy-cell { width: 35mm; }
+      .occupancy-cell .stripe { width: 100%; }
+
+      /* ── €/m² rank kartice (top/bottom 3) ─────────────────────── */
+      .rank-card {
+        flex: 1;
+        border-radius: var(--radius-lg);
+        padding: 5mm 5mm 4mm 5mm;
+        border: 1px solid;
+      }
+      .rank-card--top {
+        background: #ecfdf5;
+        border-color: #b9e3c9;
+      }
+      .rank-card--bottom {
+        background: #fff4e6;
+        border-color: #f5c891;
+      }
+      .rank-card__head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 3mm;
+        padding-bottom: 2.5mm;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+      }
+      .rank-card__title {
+        font-size: 9pt;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+      }
+      .rank-card--top .rank-card__title    { color: #0f6a44; }
+      .rank-card--bottom .rank-card__title { color: #b45309; }
+      .rank-card__sub {
+        font-size: 7.5pt;
+        color: var(--color-muted);
+        letter-spacing: 0.04em;
+      }
+      .rank-row {
+        display: flex;
+        align-items: center;
+        gap: 3mm;
+        padding: 2.5mm 0;
+        border-bottom: 1px dashed rgba(0, 0, 0, 0.08);
+      }
+      .rank-row:last-child { border-bottom: 0; }
+      .rank-row__rank {
+        width: 6mm;
+        height: 6mm;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.85);
+        font-weight: 700;
+        font-size: 9pt;
+        text-align: center;
+        line-height: 6mm;
+        flex-shrink: 0;
+      }
+      .rank-row--top .rank-row__rank    { color: #0f6a44; border: 1px solid #b9e3c9; }
+      .rank-row--bottom .rank-row__rank { color: #b45309; border: 1px solid #f5c891; }
+      .rank-row__body { flex: 1; min-width: 0; }
+      .rank-row__name {
+        font-size: 9.5pt;
+        font-weight: 600;
+        color: var(--color-ink);
+      }
+      .rank-row__meta {
+        font-size: 7.5pt;
+        color: var(--color-muted);
+        margin-top: 0.5mm;
+      }
+      .rank-row__value {
+        font-size: 11pt;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+      }
+      .rank-row--top .rank-row__value    { color: #0f6a44; }
+      .rank-row--bottom .rank-row__value { color: #b45309; }
+      .rank-row__unit {
+        font-size: 7.5pt;
+        color: var(--color-muted);
+        font-weight: 500;
+        margin-left: 0.5mm;
+      }
+
+      .text-positive { color: #0f6a44; font-weight: 600; }
+      .text-negative { color: #b45309; font-weight: 600; }
+    </style>
+  </head>
+  <body class="is-landscape">
+    <header class="report-head">
+      <p class="report-head__eyebrow">Izvještaj portfelja</p>
+      <h1 class="report-head__title">Pregled nekretnina</h1>
+      <p class="report-head__subtitle">
+        Konsolidirani prikaz vrijednosti, popunjenosti i prihoda po objektu.
+      </p>
+      <div class="report-head__meta">
+        Generirano
+        <strong>{{ generated_at }}</strong>
+      </div>
+      <div class="report-head__accent-bar"></div>
+    </header>
+
+    {# ──────────────────────────────────────  Headline KPIs  #}
+    <h2 class="section-title">Ključni pokazatelji</h2>
+    <table class="kpi-grid">
+      <tr>
+        <td class="kpi--accent">
+          <p class="kpi__label">Vrijednost portfelja</p>
+          <div class="kpi__value">{{ totals.total_value | currency }}</div>
+          <p class="kpi__sub">{{ totals.total_properties }} nekretnina · {{ totals.total_area | number }} m²</p>
+        </td>
+        <td class="kpi--info">
+          <p class="kpi__label">Mjesečni prihod</p>
+          <div class="kpi__value">{{ totals.monthly_income | currency }}</div>
+          <p class="kpi__sub">Godišnje {{ totals.annual_income | currency }}</p>
+        </td>
+        <td class="kpi--positive">
+          <p class="kpi__label">Prinos (yield)</p>
+          <div class="kpi__value">{{ totals.avg_yield }} %</div>
+          <p class="kpi__sub">Prosj. zauzeće {{ totals.avg_occupancy }} %</p>
+        </td>
+        <td>
+          <p class="kpi__label">Aktivni ugovori</p>
+          <div class="kpi__value">{{ totals.total_active_contracts }}</div>
+          <p class="kpi__sub">{{ totals.occupied_units }} / {{ totals.total_units }} jedinica popunjeno</p>
+        </td>
+      </tr>
+    </table>
+
+    {# ──────────────────────────────────────  Vrste portfelja  #}
+    {% if type_summary %}
+    <h2 class="section-title">Struktura po vrsti</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:50%">Vrsta nekretnine</th>
+          <th class="num">Broj objekata</th>
+          <th class="num">Tržišna vrijednost</th>
+          <th class="num">Mjesečni prihod</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in type_summary %}
+        <tr class="type-summary-row">
+          <td class="fw-semibold">{{ t.label }}</td>
+          <td class="num">{{ t.count }}</td>
+          <td class="num fw-semibold">{{ t.value | currency }}</td>
+          <td class="num">{{ t.income | currency }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {# ──────────────────────────────────────  Analiza €/m²  #}
+    {% if top_rent_per_m2 or bottom_rent_per_m2 or avg_per_property %}
+    <h2 class="section-title">
+      Analiza zakupnine po m²
+      {% if portfolio_avg_per_m2 %}
+        <span style="font-weight:500; letter-spacing:0; text-transform:none; color:var(--color-muted); font-size:9pt;">
+          · portfelj prosjek {{ portfolio_avg_per_m2 | currency }}/m²
+        </span>
+      {% endif %}
+    </h2>
+
+    <div style="display:flex; gap:6mm; margin-bottom:6mm;">
+      {% if top_rent_per_m2 %}
+      <div class="rank-card rank-card--top">
+        <div class="rank-card__head">
+          <span class="rank-card__title">Top 3 najbolje plaćeno</span>
+          <span class="rank-card__sub">€ / m² · aktivni ugovori</span>
+        </div>
+        {% for row in top_rent_per_m2 %}
+        <div class="rank-row rank-row--top">
+          <div class="rank-row__rank">{{ loop.index }}</div>
+          <div class="rank-row__body">
+            <div class="rank-row__name">{{ row.property_name }}</div>
+            <div class="rank-row__meta">Ugovor {{ row.oznaka }} · {{ row.area_m2 | number }} m² · {{ row.rent | currency }}/mj</div>
+          </div>
+          <div class="rank-row__value">{{ row.eur_per_m2 | currency }}<span class="rank-row__unit">/m²</span></div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if bottom_rent_per_m2 %}
+      <div class="rank-card rank-card--bottom">
+        <div class="rank-card__head">
+          <span class="rank-card__title">Top 3 najslabije plaćeno</span>
+          <span class="rank-card__sub">€ / m² · aktivni ugovori</span>
+        </div>
+        {% for row in bottom_rent_per_m2 %}
+        <div class="rank-row rank-row--bottom">
+          <div class="rank-row__rank">{{ loop.index }}</div>
+          <div class="rank-row__body">
+            <div class="rank-row__name">{{ row.property_name }}</div>
+            <div class="rank-row__meta">Ugovor {{ row.oznaka }} · {{ row.area_m2 | number }} m² · {{ row.rent | currency }}/mj</div>
+          </div>
+          <div class="rank-row__value">{{ row.eur_per_m2 | currency }}<span class="rank-row__unit">/m²</span></div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    {% if avg_per_property %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Nekretnina</th>
+          <th class="num">Ukupna površina pod ugovorima</th>
+          <th class="num">Mjesečna zakupnina</th>
+          <th class="num">Prosjek € / m²</th>
+          <th class="num">vs portfelj</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in avg_per_property %}
+        <tr>
+          <td class="fw-semibold">{{ r.property_name }}</td>
+          <td class="num">{{ r.area_m2 | number }} m²</td>
+          <td class="num">{{ r.rent | currency }}</td>
+          <td class="num fw-semibold">{{ r.eur_per_m2 | currency }}/m²</td>
+          <td class="num">
+            {% if portfolio_avg_per_m2 %}
+              {% set diff_pct = ((r.eur_per_m2 - portfolio_avg_per_m2) / portfolio_avg_per_m2) * 100 %}
+              {% if diff_pct >= 0 %}
+                <span class="text-positive">+{{ "%.1f"|format(diff_pct) }} %</span>
+              {% else %}
+                <span class="text-negative">{{ "%.1f"|format(diff_pct) }} %</span>
+              {% endif %}
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% endif %}
+
+    {# ──────────────────────────────────────  Detalj po objektu  #}
+    <h2 class="section-title">Pregled po nekretnini</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:30%">Nekretnina</th>
+          <th>Vrsta</th>
+          <th class="num">Površina</th>
+          <th class="num">Tržišna vrijednost</th>
+          <th class="num">Mj. prihod</th>
+          <th>Popunjenost</th>
+          <th class="num">Ugovori</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in properties %}
+        <tr class="no-break">
+          <td>
+            <div class="fw-semibold">{{ p.naziv }}</div>
+            <div class="text-xs text-muted">{{ p.adresa }}</div>
+          </td>
+          <td class="type-text">{{ p.type_label }}</td>
+          <td class="num">{{ p.povrsina | number }} m²</td>
+          <td class="num fw-semibold">{{ p.trzisna_vrijednost | currency }}</td>
+          <td class="num">{{ p.monthly_income | currency }}</td>
+          <td class="occupancy-cell">
+            <div class="text-xs text-muted" style="margin-bottom: 1mm;">
+              {{ p.occupied_units }} / {{ p.total_units or '—' }} · {{ p.occupancy_percent | clamp_pct }} %
+            </div>
+            <div class="stripe">
+              <div class="stripe__fill" style="width: {{ p.occupancy_percent | clamp_pct }}%"></div>
+            </div>
+          </td>
+          <td class="num">{{ p.active_contract_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>Ukupno · {{ totals.total_properties }} nekretnina</td>
+          <td></td>
+          <td class="num">{{ totals.total_area | number }} m²</td>
+          <td class="num">{{ totals.total_value | currency }}</td>
+          <td class="num">{{ totals.monthly_income | currency }}</td>
+          <td>{{ totals.avg_occupancy }} %</td>
+          <td class="num">{{ totals.total_active_contracts }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </body>
+</html>

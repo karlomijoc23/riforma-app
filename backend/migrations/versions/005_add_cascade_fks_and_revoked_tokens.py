@@ -6,7 +6,7 @@ Create Date: 2026-02-27
 
 """
 import logging
-from typing import Sequence, Union
+from typing import Optional, Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
@@ -49,7 +49,7 @@ FK_CHANGES = [
 ]
 
 
-def _find_fk_name(inspector, table: str, column: str, ref_table: str) -> str | None:
+def _find_fk_name(inspector, table: str, column: str, ref_table: str) -> Optional[str]:
     """Find the FK constraint name by inspecting the actual DB schema."""
     try:
         fks = inspector.get_foreign_keys(table)

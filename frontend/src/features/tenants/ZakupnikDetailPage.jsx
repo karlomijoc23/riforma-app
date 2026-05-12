@@ -59,6 +59,7 @@ import {
 import ZakupnikForm from "./ZakupnikForm";
 import { toast } from "../../components/ui/sonner";
 import { useReactToPrint } from "react-to-print";
+import PageBreadcrumbs from "../../components/PageBreadcrumbs";
 
 const ZakupnikDetailPage = () => {
   const { id } = useParams();
@@ -84,6 +85,56 @@ const ZakupnikDetailPage = () => {
   const [pageLoading, setPageLoading] = useState(true);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [invitingUser, setInvitingUser] = useState(false);
+
+  const handleInviteUser = async () => {
+    if (!tenant?.id) return;
+    setInvitingUser(true);
+    try {
+      const res = await api.inviteTenantUser(tenant.id);
+      const tempPassword = res.data?.temp_password;
+      const email = res.data?.email;
+      // Surface the temp password — admin must copy it for the tenant.
+      // window.prompt lets the admin select+copy without an extra UI layer.
+      window.prompt(
+        `Korisnički račun kreiran za ${email}. Kopiraj ovu privremenu lozinku i pošalji je zakupniku sigurnim kanalom:`,
+        tempPassword,
+      );
+      toast.success("Korisnički račun povezan sa zakupnikom.");
+      // Refresh tenant data so the button switches state.
+      const fresh = await api.getZakupnik(tenant.id);
+      setTenant(fresh.data);
+    } catch (err) {
+      const detail =
+        err?.response?.data?.detail ||
+        "Neuspješno kreiranje korisničkog računa.";
+      toast.error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    } finally {
+      setInvitingUser(false);
+    }
+  };
+
+  const handleUnlinkUser = async () => {
+    if (!tenant?.id) return;
+    if (
+      !window.confirm(
+        "Sigurno želiš ukloniti vezu korisničkog računa s ovim zakupnikom? Korisnik gubi pristup self-service portalu.",
+      )
+    ) {
+      return;
+    }
+    setInvitingUser(true);
+    try {
+      await api.unlinkTenantUser(tenant.id);
+      toast.success("Veza korisničkog računa uklonjena.");
+      const fresh = await api.getZakupnik(tenant.id);
+      setTenant(fresh.data);
+    } catch (err) {
+      toast.error("Neuspješno odvajanje korisničkog računa.");
+    } finally {
+      setInvitingUser(false);
+    }
+  };
   const printRef = useRef();
 
   const handlePrint = useReactToPrint({
@@ -212,6 +263,13 @@ const ZakupnikDetailPage = () => {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6" ref={printRef}>
+      <PageBreadcrumbs
+        items={[
+          { label: "Zakupnici", to: "/zakupnici" },
+          { label: tenant.naziv_firme || tenant.ime_prezime || "Detalji" },
+        ]}
+      />
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
@@ -259,6 +317,29 @@ const ZakupnikDetailPage = () => {
           <Button variant="outline" onClick={handlePrint}>
             <Printer className="mr-2 h-4 w-4" /> Ispiši
           </Button>
+          {!tenant.user_id ? (
+            <Button
+              variant="outline"
+              onClick={handleInviteUser}
+              disabled={invitingUser}
+            >
+              {invitingUser ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <User className="mr-2 h-4 w-4" />
+              )}
+              Pozovi korisnika
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={handleUnlinkUser}
+              disabled={invitingUser}
+              title="Ukloni povezani korisnički račun"
+            >
+              <User className="mr-2 h-4 w-4" /> Korisnik povezan
+            </Button>
+          )}
           <Button onClick={() => setIsEditOpen(true)}>
             <Edit className="mr-2 h-4 w-4" /> Uredi
           </Button>

@@ -53,6 +53,7 @@ import {
   Undo2,
   RefreshCw,
   TableProperties,
+  Loader2,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -103,8 +104,10 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { useNavigate } from "react-router-dom";
-import { generatePdf } from "../../shared/pdfGenerator";
-import ContractPrintTemplate from "./ContractPrintTemplate";
+import {
+  downloadPdfFromResponse,
+  extractBlobErrorDetail,
+} from "../../shared/downloadBlob";
 import {
   Tabs,
   TabsContent,
@@ -297,21 +300,23 @@ const UgovoriPage = () => {
   const [showArchive, setShowArchive] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [allDocuments, setAllDocuments] = useState([]);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
-  const printRef = React.useRef();
-
-  // Fetch all documents for the main table view
-  useEffect(() => {
-    const fetchAllDocs = async () => {
-      try {
-        const res = await api.getDokumenti();
-        setAllDocuments(res.data || []);
-      } catch (err) {
-        console.error("Failed to fetch all documents", err);
-      }
-    };
-    fetchAllDocs();
+  // Fetch all documents for the main table view.
+  // Exposed as a stable callback so the form onSuccess can re-sync the
+  // document badges after a contract + PDF upload.
+  const fetchAllDocs = React.useCallback(async () => {
+    try {
+      const res = await api.getDokumenti();
+      setAllDocuments(res.data || []);
+    } catch (err) {
+      console.error("Failed to fetch all documents", err);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchAllDocs();
+  }, [fetchAllDocs]);
 
   // Group documents by contract ID for quick lookup
   const docsByContract = useMemo(() => {
@@ -368,6 +373,9 @@ const UgovoriPage = () => {
   const handleSuccess = () => {
     setIsDialogOpen(false);
     refreshUgovori();
+    // The contract form may have attached a PDF; re-fetch documents so the
+    // "contract document" badge shows up immediately on the new row.
+    fetchAllDocs();
   };
 
   const handleStatusChange = async (ugovor, newStatus) => {
@@ -485,15 +493,22 @@ const UgovoriPage = () => {
   ]);
 
   const handlePrint = async () => {
+    setDownloadingPdf(true);
     try {
-      await generatePdf(
-        printRef.current,
-        `izvjestaj_ugovori_${new Date().toISOString().split("T")[0]}`,
-        "landscape",
-      );
-      toast.success("Izvještaj je generiran");
+      const params = {};
+      if (filterStatus !== "all") params.status = filterStatus;
+      if (filterZakupnik !== "all") params.zakupnik_id = filterZakupnik;
+      if (filterDateFrom) params.date_from = filterDateFrom;
+      if (filterDateTo) params.date_to = filterDateTo;
+
+      const res = await api.exportContractsReportPdf(params);
+      downloadPdfFromResponse(res, "riforma-izvjestaj-ugovora.pdf");
+      toast.success("PDF preuzet.");
     } catch (error) {
-      toast.error("Greška pri generiranju izvještaja");
+      const detail = await extractBlobErrorDetail(error);
+      toast.error(detail);
+    } finally {
+      setDownloadingPdf(false);
     }
   };
 
@@ -547,19 +562,6 @@ const UgovoriPage = () => {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 md:px-6">
-      {/* Off-screen print template */}
-      <div className="absolute top-0 left-[-9999px] -z-50">
-        <ContractPrintTemplate
-          ref={printRef}
-          contracts={filteredUgovori.map((c) => ({
-            ...c,
-            zakupnik_naziv: c.zakupnik_naziv || "Nepoznat zakupnik", // Ensure name is present
-          }))}
-          nekretnine={nekretnine}
-          zakupnici={zakupnici}
-        />
-      </div>
-
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between mb-6">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-primary">
@@ -605,6 +607,19 @@ const UgovoriPage = () => {
           </Button>
           <Button variant="outline" onClick={() => navigate("/ugovori/report")}>
             <Printer className="mr-2 h-4 w-4" /> Izvještaj
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handlePrint}
+            disabled={downloadingPdf}
+            title="Skini PDF s trenutnim filterima"
+          >
+            {downloadingPdf ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Printer className="mr-2 h-4 w-4" />
+            )}
+            PDF (filteri)
           </Button>
           <Button onClick={handleCreate}>
             <Plus className="mr-2 h-4 w-4" /> Novi ugovor
@@ -957,10 +972,17 @@ const UgovoriPage = () => {
                 );
                 const propertyName = property?.naziv || "—";
 
-                const unit = propertyUnits?.find(
-                  (u) => u.id === ugovor.property_unit_id,
-                );
-                const unitName = unit ? getUnitDisplayName(unit) : null;
+                const linkedUnitIds = Array.isArray(ugovor.property_unit_ids)
+                  ? ugovor.property_unit_ids
+                  : ugovor.property_unit_id
+                    ? [ugovor.property_unit_id]
+                    : [];
+                const linkedUnits = linkedUnitIds
+                  .map((uid) => propertyUnits?.find((u) => u.id === uid))
+                  .filter(Boolean);
+                const unitName = linkedUnits.length
+                  ? linkedUnits.map((u) => getUnitDisplayName(u)).join(", ")
+                  : null;
 
                 let displayStatus = ugovor.status || "Nepoznato";
                 if (ugovor.status === "aktivno" && expiring) {
@@ -1428,22 +1450,36 @@ const UgovoriPage = () => {
                           (n) => n.id === viewContract.nekretnina_id,
                         )?.naziv || "Nepoznata nekretnina"}
                       </span>
-                      {viewContract.property_unit_id && (
-                        <>
-                          <span className="text-muted-foreground/50 mx-1">
-                            /
-                          </span>
-                          <span className="font-bold text-primary">
-                            {getUnitDisplayName(
-                              propertyUnits.find(
-                                (u) =>
-                                  u.id === viewContract.property_unit_id ||
-                                  u.localId === viewContract.property_unit_id,
-                              ),
-                            ) || "Jedinica"}
-                          </span>
-                        </>
-                      )}
+                      {(() => {
+                        const ids = Array.isArray(
+                          viewContract.property_unit_ids,
+                        )
+                          ? viewContract.property_unit_ids
+                          : viewContract.property_unit_id
+                            ? [viewContract.property_unit_id]
+                            : [];
+                        if (!ids.length) return null;
+                        const unitsForRow = ids
+                          .map((uid) =>
+                            propertyUnits.find(
+                              (u) => u.id === uid || u.localId === uid,
+                            ),
+                          )
+                          .filter(Boolean);
+                        if (!unitsForRow.length) return null;
+                        return (
+                          <>
+                            <span className="text-muted-foreground/50 mx-1">
+                              /
+                            </span>
+                            <span className="font-bold text-primary">
+                              {unitsForRow
+                                .map((u) => getUnitDisplayName(u))
+                                .join(", ")}
+                            </span>
+                          </>
+                        );
+                      })()}
                     </div>
                     <SheetTitle className="text-2xl font-bold text-foreground break-all">
                       {viewContract.interna_oznaka}

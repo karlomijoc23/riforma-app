@@ -60,10 +60,15 @@ async def run_scheduler():
                 ]
             )
 
-            # Background jobs need a tenant context; iterate over all active tenants
+            # Background jobs need a tenant context; iterate over all active tenants.
+            # We use ContextVar.set() → reset(token) so the context unwinds
+            # exactly to its prior state on every iteration. Previously
+            # `set(None)` left the ContextVar with a None value rather than
+            # restoring the original, which can leak through to coroutines
+            # scheduled in the wrong order on asyncio edge cases.
             all_tenants = await saas_tenants.find_all(filters={"status": "active"})
             for t in all_tenants:
-                CURRENT_TENANT_ID.set(t.id)
+                token = CURRENT_TENANT_ID.set(t.id)
                 try:
                     await sync_contract_and_unit_statuses()
                     from app.services.recurring_maintenance_service import (
@@ -77,7 +82,7 @@ async def run_scheduler():
                 except Exception as e:
                     logger.error(f"Scheduler error for tenant {t.id}: {e}")
                 finally:
-                    CURRENT_TENANT_ID.set(None)
+                    CURRENT_TENANT_ID.reset(token)
         except Exception as e:
             logger.error(f"Error in background scheduler: {e}")
 
@@ -248,13 +253,17 @@ async def health_check():
 async def readiness_check():
     """Readiness probe - can the server handle requests? Checks DB connection."""
     try:
-        from app.db.session import get_engine
+        from app.db.session import get_engine, get_pool_stats
         from sqlalchemy import text
 
         engine = get_engine()
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        return {"status": "ready", "database": "connected"}
+        return {
+            "status": "ready",
+            "database": "connected",
+            "pool": get_pool_stats(),
+        }
     except Exception as e:
         logger.error(f"Readiness check failed: {e}")
         return JSONResponse(
@@ -318,10 +327,41 @@ async def add_security_headers(request: Request, call_next):
 
 
 # Activity Logging Middleware
+#
+# The write goes through `asyncio.create_task` so it doesn't add DB
+# round-trip latency to every response. `create_task` snapshots the
+# current ContextVars (including CURRENT_TENANT_ID), so the
+# tenant-scoped repository sees the right tenant inside the background
+# task even though the request context has unwound by then.
+#
+# We keep strong references in `_pending_activity_logs` until each task
+# finishes — without this, Python may GC a still-running task created
+# in middleware and warn about it. The set is bounded by request
+# throughput × write latency, which is tiny in practice.
+
+_pending_activity_logs: "set[asyncio.Task]" = set()
+
+
+def _spawn_activity_log_write(payload: dict) -> None:
+    """Fire-and-forget activity-log insert. Errors are logged, not raised."""
+
+    async def _write() -> None:
+        try:
+            await activity_logs.create(payload)
+        except Exception as exc:  # noqa: BLE001 - background write, never crash
+            logger.error("Failed to log activity: %s", exc)
+
+    task = asyncio.create_task(_write())
+    _pending_activity_logs.add(task)
+    task.add_done_callback(_pending_activity_logs.discard)
+
+
 @app.middleware("http")
 async def activity_logger(request: Request, call_next):
     request_id = str(uuid.uuid4())
     start_time = time.perf_counter()
+
+    from app.db.tenant import CURRENT_TENANT_ID
 
     try:
         response = await call_next(request)
@@ -339,7 +379,6 @@ async def activity_logger(request: Request, call_next):
         }
 
         try:
-            from app.db.tenant import CURRENT_TENANT_ID
             if CURRENT_TENANT_ID.get(None) is not None:
                 log = ActivityLog(
                     user=principal.get("name", "anonymous"),
@@ -352,7 +391,7 @@ async def activity_logger(request: Request, call_next):
                     request_id=request_id,
                     duration_ms=duration_ms,
                 )
-                await activity_logs.create(log.model_dump())
+                _spawn_activity_log_write(log.model_dump())
         except Exception as e:
             logger.error(f"Failed to log activity: {e}")
 
@@ -360,7 +399,6 @@ async def activity_logger(request: Request, call_next):
     except Exception:
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         try:
-            from app.db.tenant import CURRENT_TENANT_ID
             if CURRENT_TENANT_ID.get(None) is not None:
                 principal = getattr(request.state, "current_user", None) or {
                     "id": "guest",
@@ -380,7 +418,7 @@ async def activity_logger(request: Request, call_next):
                     duration_ms=duration_ms,
                     message="Interna greška poslužitelja",
                 )
-                await activity_logs.create(log.model_dump())
+                _spawn_activity_log_write(log.model_dump())
         except Exception:
             pass
         raise
@@ -389,21 +427,49 @@ async def activity_logger(request: Request, call_next):
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
-# Ensure upload directory exists
+# Ensure upload directory exists and is writable. A silent permission error
+# here used to surface as "upload 500 / document not saved" in production;
+# we fail fast with a clear log instead so the same incident doesn't recur.
 UPLOAD_DIR = settings.UPLOAD_DIR
-if not UPLOAD_DIR.exists():
+try:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+except OSError as _exc:
+    logger.error(
+        "UPLOAD_DIR %s is not creatable: %s. "
+        "Check ownership (chown -R riforma:riforma) and systemd ReadWritePaths.",
+        UPLOAD_DIR,
+        _exc,
+    )
+else:
+    _probe = UPLOAD_DIR / ".write_probe"
+    try:
+        _probe.write_bytes(b"ok")
+        _probe.unlink()
+    except OSError as _exc:
+        logger.error(
+            "UPLOAD_DIR %s exists but is not writable by the service user: %s. "
+            "Uploads will return 500 until ownership/systemd paths are fixed.",
+            UPLOAD_DIR,
+            _exc,
+        )
 
 
 # Auth-protected uploads endpoint (replaces unauthenticated StaticFiles mount)
 @app.get("/uploads/{file_path:path}", tags=["uploads"])
 async def serve_upload(file_path: str, request: Request):
-    """Serve uploaded files with authentication check."""
-    # Require valid auth (cookie or Bearer)
+    """Serve uploaded files with authentication AND tenant scope checks.
+
+    The filename pattern is `{doc_id}_{...}` for the original and
+    `{doc_id}_thumb.jpg` / `{doc_id}_medium.jpg` for image variants. We
+    extract the doc_id (a UUID4), look up the document row, and verify
+    its tenant matches the caller's CURRENT_TENANT_ID. Without this
+    check, an authenticated user in tenant B could fetch tenant A's
+    file just by knowing or guessing a UUID-prefixed filename.
+    """
     from app.api.deps import get_current_user
 
     try:
-        await get_current_user(request)
+        principal = await get_current_user(request)
     except Exception:
         return JSONResponse(
             status_code=401,
@@ -423,5 +489,30 @@ async def serve_upload(file_path: str, request: Request):
             status_code=404,
             content={"detail": "Datoteka nije pronađena"},
         )
+
+    # Tenant scope check: extract the doc_id prefix (UUID4 = 36 chars
+    # ending before the first underscore in the filename) and confirm
+    # the owning document belongs to the caller's tenant.
+    from app.db.repositories.instance import dokumenti
+    from app.db.tenant import CURRENT_TENANT_ID
+    from sqlalchemy import or_ as _or
+
+    filename = requested.name
+    doc_id = filename.split("_", 1)[0] if "_" in filename else None
+    if doc_id and len(doc_id) == 36:
+        # `dokumenti` is tenant-scoped via the repository, so a get_by_id
+        # inside the caller's tenant returns the row only if it belongs
+        # to that tenant. A cross-tenant filename returns None → 403.
+        # Set CURRENT_TENANT_ID from principal for the duration of this
+        # lookup since /uploads/* isn't routed through the v1 router.
+        if principal.get("tenant_id"):
+            CURRENT_TENANT_ID.set(principal["tenant_id"])
+        doc = await dokumenti.get_by_id(doc_id)
+        if not doc:
+            # Either doesn't exist, or belongs to a different tenant.
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Pristup datoteci nije dozvoljen"},
+            )
 
     return FileResponse(path=str(requested))

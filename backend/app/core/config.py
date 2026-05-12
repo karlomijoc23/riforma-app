@@ -111,15 +111,19 @@ class Settings:
     INITIAL_ADMIN_ROLE: str = os.environ.get("INITIAL_ADMIN_ROLE", "owner")
 
     # Paths
-    UPLOAD_DIR: Path = ROOT_DIR / "uploads"
-    DOCUMENT_REQUIREMENTS_PATH: Optional[str] = os.environ.get(
-        "DOCUMENT_REQUIREMENTS_PATH"
-    )
+    #
+    # UPLOAD_DIR overrides the on-disk location where uploaded documents
+    # live. The default (`<repo>/backend/uploads`) is convenient for local
+    # dev, but production deploys set `UPLOAD_DIR=/opt/riforma/uploads` in
+    # .env so the path matches what setup-server.sh creates and what the
+    # systemd `ReadWritePaths` allows. Mismatching these three is the
+    # classic cause of "upload works once, then 500" incidents.
+    UPLOAD_DIR: Path = Path(os.environ.get("UPLOAD_DIR", str(ROOT_DIR / "uploads")))
+    UPLOAD_MIN_FREE_MB: int = int(os.environ.get("UPLOAD_MIN_FREE_MB", "500"))
 
     # Defaults
     DEFAULT_TENANT_ID: str = os.environ.get("DEFAULT_TENANT_ID", "tenant-default")
     DEFAULT_TENANT_NAME: str = os.environ.get("DEFAULT_TENANT_NAME", "Glavna portfelj")
-    OPENAI_API_KEY: Optional[str] = os.environ.get("OPENAI_API_KEY")
     ANTHROPIC_API_KEY: Optional[str] = os.environ.get("ANTHROPIC_API_KEY")
     CLAUDE_MODEL: str = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
     SENTRY_DSN_BACKEND: Optional[str] = os.environ.get("SENTRY_DSN_BACKEND")

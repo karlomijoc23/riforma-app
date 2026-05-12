@@ -88,11 +88,18 @@ const MaintenanceCostAnalytics = React.lazy(
 const FinancialReportPage = React.lazy(
   () => import("./features/reports/FinancialReportPage"),
 );
+const TenantPortalPage = React.lazy(
+  () => import("./features/portal/TenantPortalPage"),
+);
+const ChangePasswordPage = React.lazy(
+  () => import("./features/auth/ChangePasswordPage"),
+);
 
 const AppContent = () => {
-  const { loading, isAuthenticated } = useAuth();
+  const { loading, isAuthenticated, user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const isTenantUser = user?.role === "tenant";
 
   // Listen for NO_TENANT errors and redirect to profile creation
   useEffect(() => {
@@ -129,6 +136,62 @@ const AppContent = () => {
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
+        <Toaster />
+      </>
+    );
+  }
+
+  // Force password change BEFORE anything else — admin-issued temp
+  // passwords must be rotated. Applies to every role.
+  if (user?.must_change_password) {
+    return (
+      <>
+        <SkipLink />
+        <main id="main-content">
+          <Suspense
+            fallback={
+              <div className="flex h-screen items-center justify-center">
+                <Loader2 className="h-7 w-7 animate-spin text-primary" />
+              </div>
+            }
+          >
+            <Routes>
+              <Route
+                path="*"
+                element={<ChangePasswordPage forced={true} />}
+              />
+            </Routes>
+          </Suspense>
+        </main>
+        <Toaster />
+      </>
+    );
+  }
+
+  // Tenant role gets a stripped-down portal-only experience — no admin
+  // navigation, no entity store (the portal calls its own /self/* APIs).
+  if (isTenantUser) {
+    return (
+      <>
+        <SkipLink />
+        <main id="main-content">
+          <Suspense
+            fallback={
+              <div className="flex h-screen items-center justify-center">
+                <Loader2 className="h-7 w-7 animate-spin text-primary" />
+              </div>
+            }
+          >
+            <Routes>
+              <Route path="/portal" element={<TenantPortalPage />} />
+              <Route
+                path="/postavke/lozinka"
+                element={<ChangePasswordPage />}
+              />
+              <Route path="*" element={<Navigate to="/portal" replace />} />
+            </Routes>
+          </Suspense>
+        </main>
         <Toaster />
       </>
     );
@@ -287,6 +350,14 @@ const AppContent = () => {
                 element={
                   <PageTransition>
                     <SettingsPage />
+                  </PageTransition>
+                }
+              />
+              <Route
+                path="/postavke/lozinka"
+                element={
+                  <PageTransition>
+                    <ChangePasswordPage />
                   </PageTransition>
                 }
               />

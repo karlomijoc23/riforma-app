@@ -129,8 +129,40 @@ async def get_current_user(request: Request) -> Dict[str, Any]:
     if tenant_id:
         CURRENT_TENANT_ID.set(tenant_id)
     principal["tenant_id"] = tenant_id
+    principal["must_change_password"] = bool(
+        getattr(user_row, "must_change_password", False)
+    )
 
     request.state.current_user = principal
+
+    # Enforce password rotation server-side. Without this, a leaked temp
+    # password lets a curl client hit every /self/* + admin route forever;
+    # the frontend interceptor doesn't protect the API. Only the password-
+    # change endpoint, /users/me (so the frontend can read the flag), and
+    # logout are allowed while the flag is set.
+    if principal["must_change_password"]:
+        path = request.url.path
+        allowed_prefixes = (
+            f"{settings.API_V1_STR}/users/me/password",
+            f"{settings.API_V1_STR}/auth/logout",
+        )
+        # Allow reading own user via /users/me so the frontend can detect
+        # the flag and render the change-password page.
+        allowed_exact = {
+            f"{settings.API_V1_STR}/users/me",
+        }
+        if not (
+            any(path.startswith(p) for p in allowed_prefixes)
+            or path in allowed_exact
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Morate promijeniti privremenu lozinku prije korištenja"
+                    " aplikacije."
+                ),
+            )
+
     return principal
 
 
@@ -175,3 +207,40 @@ def require_scopes(*scopes: str):
         return True
 
     return _dependency
+
+
+async def get_current_zakupnik(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Resolve the ZakupniciRow for the currently logged-in `tenant` user.
+
+    Used by `/self/*` endpoints. The `tenant` role can only see its own
+    zakupnik record + dependent data (contracts, bills, maintenance,
+    documents). Other roles also resolve through this when they explicitly
+    hit a `/self/*` route — but typically those routes are tenant-only.
+
+    Returns the ORM row. Raises 403 if no zakupnik is linked to the user
+    (admin still needs to "Invite tenant user" first).
+    """
+    from app.db.repositories.instance import zakupnici
+    from app.models.tables import ZakupniciRow
+
+    user_id = current_user.get("id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Niste prijavljeni.",
+        )
+
+    zakupnik = await zakupnici.find_one(
+        extra_conditions=[ZakupniciRow.user_id == user_id]
+    )
+    if not zakupnik:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Vaš korisnički račun još nije povezan sa zakupnikom."
+                " Obratite se upravitelju portfelja."
+            ),
+        )
+    return zakupnik

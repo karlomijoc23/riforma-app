@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -68,10 +68,13 @@ import {
   parseSmartNumber,
 } from "../../shared/formatters";
 import NekretninarForm from "./NekretninarForm";
-import ParkingTab from "./ParkingTab";
-import PropertyPrintTemplate from "./PropertyPrintTemplate";
-import { generatePdf } from "../../shared/pdfGenerator";
+import UnitPhotosGallery from "./UnitPhotosGallery";
+import {
+  downloadPdfFromResponse,
+  extractBlobErrorDetail,
+} from "../../shared/downloadBlob";
 import { toast } from "../../components/ui/sonner";
+import PageBreadcrumbs from "../../components/PageBreadcrumbs";
 
 const NekretninaDetailPage = () => {
   const { id } = useParams();
@@ -96,12 +99,13 @@ const NekretninaDetailPage = () => {
   // State
   const [property, setProperty] = useState(null);
   const [units, setUnits] = useState([]);
+  const [parkings, setParkings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [existingUnits, setExistingUnits] = useState([]);
+  const [existingParkings, setExistingParkings] = useState([]);
   const [submitting, setSubmitting] = useState(false);
-  const [printContracts, setPrintContracts] = useState([]);
-  const printRef = useRef();
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   // Load property and units
   useEffect(() => {
@@ -117,9 +121,13 @@ const NekretninaDetailPage = () => {
           const res = await api.getNekretnina(id);
           setProperty(res.data);
         }
-        // Always fetch units fresh
-        const unitsRes = await api.getUnitsForProperty(id);
+        // Always fetch units + parkings fresh
+        const [unitsRes, parkingsRes] = await Promise.all([
+          api.getUnitsForProperty(id),
+          api.getParking(id),
+        ]);
         setUnits(unitsRes.data || []);
+        setParkings(parkingsRes.data || []);
       } catch (err) {
         console.error("Failed to load property", err);
         toast.error("Nekretnina nije pronađena");
@@ -173,11 +181,13 @@ const NekretninaDetailPage = () => {
       };
     }
 
-    const activeUnitIds = new Set(
-      activeContracts
-        .filter((c) => c.property_unit_id)
-        .map((c) => c.property_unit_id),
-    );
+    const activeUnitIds = new Set();
+    activeContracts.forEach((c) => {
+      if (c.property_unit_id) activeUnitIds.add(c.property_unit_id);
+      if (Array.isArray(c.property_unit_ids)) {
+        c.property_unit_ids.forEach((id) => activeUnitIds.add(id));
+      }
+    });
 
     const totalArea = units.reduce(
       (sum, u) => sum + (parseFloat(u.povrsina_m2) || 0),
@@ -253,11 +263,15 @@ const NekretninaDetailPage = () => {
   // Handlers
   const handleEdit = async () => {
     try {
-      const res = await api.getUnitsForProperty(id);
-      setExistingUnits(res.data || []);
+      const [unitsRes, parkingsRes] = await Promise.all([
+        api.getUnitsForProperty(id),
+        api.getParking(id),
+      ]);
+      setExistingUnits(unitsRes.data || []);
+      setExistingParkings(parkingsRes.data || []);
     } catch (err) {
-      console.error("Failed to fetch units for editing", err);
-      toast.error("Neuspješno učitavanje jedinica");
+      console.error("Failed to fetch units/parking for editing", err);
+      toast.error("Neuspješno učitavanje podataka nekretnine");
     }
     setIsEditOpen(true);
   };
@@ -266,6 +280,8 @@ const NekretninaDetailPage = () => {
     nekretnina,
     units: formUnits,
     deletedUnitIds,
+    parkings: formParkings,
+    deletedParkingIds,
     imageFile,
   }) => {
     setSubmitting(true);
@@ -312,17 +328,35 @@ const NekretninaDetailPage = () => {
         }
       }
 
+      // Handle parkings (create/update + delete)
+      if (formParkings && formParkings.length > 0) {
+        for (const p of formParkings) {
+          if (p.id) {
+            await api.updateParking(p.id, p);
+          } else {
+            await api.createParking({ ...p, nekretnina_id: id });
+          }
+        }
+      }
+      if (deletedParkingIds && deletedParkingIds.length > 0) {
+        for (const pid of deletedParkingIds) {
+          await api.deleteParking(pid);
+        }
+      }
+
       toast.success("Nekretnina je ažurirana");
       setIsEditOpen(false);
 
       // Refresh store and reload local data
       await refresh();
-      const [propRes, unitsRes] = await Promise.all([
+      const [propRes, unitsRes, parkingsRes] = await Promise.all([
         api.getNekretnina(id),
         api.getUnitsForProperty(id),
+        api.getParking(id),
       ]);
       setProperty(propRes.data);
       setUnits(unitsRes.data || []);
+      setParkings(parkingsRes.data || []);
     } catch (error) {
       console.error("Greška pri spremanju:", error);
       toast.error("Spremanje nije uspjelo");
@@ -332,23 +366,22 @@ const NekretninaDetailPage = () => {
   };
 
   const handlePrint = async () => {
-    if (!property) return;
+    if (!property?.id) return;
+    setDownloadingPdf(true);
     try {
-      const propertyContracts = (ugovori || []).filter(
-        (c) => String(c.nekretnina_id) === String(id),
+      const res = await api.exportPropertyDetailPdf(property.id);
+      const safeName = (property.naziv || "nekretnina").replace(
+        /[^a-zA-Z0-9_-]/g,
+        "_",
       );
-      setPrintContracts(propertyContracts);
-      setTimeout(async () => {
-        await generatePdf(
-          printRef.current,
-          `nekretnina_${property.naziv.replace(/\s+/g, "_")}`,
-          "portrait",
-        );
-        toast.success("PDF je generiran");
-      }, 100);
+      downloadPdfFromResponse(res, `riforma-nekretnina-${safeName}.pdf`);
+      toast.success("PDF preuzet.");
     } catch (error) {
       console.error("Print error:", error);
-      toast.error("Greška pri generiranju PDF-a");
+      const detail = await extractBlobErrorDetail(error);
+      toast.error(detail);
+    } finally {
+      setDownloadingPdf(false);
     }
   };
 
@@ -399,15 +432,12 @@ const NekretninaDetailPage = () => {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 space-y-6">
-      {/* Off-screen print template */}
-      <div className="absolute top-0 left-[-9999px] -z-50">
-        <PropertyPrintTemplate
-          ref={printRef}
-          property={property}
-          contracts={printContracts}
-          units={units}
-        />
-      </div>
+      <PageBreadcrumbs
+        items={[
+          { label: "Nekretnine", to: "/nekretnine" },
+          { label: property.naziv || "Detalji" },
+        ]}
+      />
 
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -436,8 +466,18 @@ const NekretninaDetailPage = () => {
           <Button variant="outline" size="sm" onClick={handleEdit}>
             <Edit className="mr-2 h-4 w-4" /> Uredi
           </Button>
-          <Button variant="outline" size="sm" onClick={handlePrint}>
-            <Printer className="mr-2 h-4 w-4" /> Ispiši
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handlePrint}
+            disabled={downloadingPdf}
+          >
+            {downloadingPdf ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Printer className="mr-2 h-4 w-4" />
+            )}
+            Ispiši
           </Button>
         </div>
       </div>
@@ -556,14 +596,14 @@ const NekretninaDetailPage = () => {
           <TabsTrigger value="units" className="flex-1 min-w-[100px]">
             Jedinice ({units.length})
           </TabsTrigger>
+          {parkings.length > 0 && (
+            <TabsTrigger value="parking" className="flex-1 min-w-[100px]">
+              Parking ({parkings.length})
+            </TabsTrigger>
+          )}
           <TabsTrigger value="napomene" className="flex-1 min-w-[80px]">
             Napomene
           </TabsTrigger>
-          {property.has_parking && (
-            <TabsTrigger value="parking" className="flex-1 min-w-[80px]">
-              Parking
-            </TabsTrigger>
-          )}
         </TabsList>
 
         {/* === PREGLED TAB === */}
@@ -761,9 +801,15 @@ const NekretninaDetailPage = () => {
                       const tenant = (zakupnici || []).find(
                         (z) => z.id === c.zakupnik_id,
                       );
-                      const unit = units.find(
-                        (u) => u.id === c.property_unit_id,
-                      );
+                      const unitIds = Array.isArray(c.property_unit_ids)
+                        ? c.property_unit_ids
+                        : c.property_unit_id
+                          ? [c.property_unit_id]
+                          : [];
+                      const unitsForContract = unitIds
+                        .map((uid) => units.find((u) => u.id === uid))
+                        .filter(Boolean);
+                      const unit = unitsForContract[0];
                       return (
                         <TableRow key={c.id}>
                           <TableCell className="font-medium">
@@ -773,7 +819,9 @@ const NekretninaDetailPage = () => {
                             {tenant?.naziv || c.zakupnik_naziv || "—"}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
-                            {unit?.oznaka || "—"}
+                            {unitsForContract.length > 0
+                              ? unitsForContract.map((u) => u.oznaka).join(", ")
+                              : "—"}
                           </TableCell>
                           <TableCell>
                             <Badge
@@ -933,12 +981,14 @@ const NekretninaDetailPage = () => {
                   </TableHeader>
                   <TableBody>
                     {units.map((unit) => {
+                      const unitMatchId = unit.id || unit.localId;
                       const activeContract = (ugovori || []).find(
                         (c) =>
                           (c.status === "aktivno" ||
                             c.status === "na_isteku") &&
-                          (c.property_unit_id === unit.id ||
-                            c.property_unit_id === unit.localId),
+                          (c.property_unit_id === unitMatchId ||
+                            (Array.isArray(c.property_unit_ids) &&
+                              c.property_unit_ids.includes(unitMatchId))),
                       );
                       const tenant = activeContract
                         ? (zakupnici || []).find(
@@ -1094,7 +1144,147 @@ const NekretninaDetailPage = () => {
               )}
             </CardContent>
           </Card>
+
+          {units.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Slike jedinica</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {units.map((unit) => (
+                  <div
+                    key={`gallery-${unit.id}`}
+                    className="flex flex-col sm:flex-row sm:items-start sm:gap-4 gap-2 pb-3 border-b last:border-b-0 last:pb-0"
+                  >
+                    <div className="sm:w-40 shrink-0">
+                      <p className="font-medium text-sm">
+                        {unit.oznaka}
+                        {unit.naziv ? (
+                          <span className="text-muted-foreground font-normal">
+                            {" "}
+                            · {unit.naziv}
+                          </span>
+                        ) : null}
+                      </p>
+                      {unit.kat && (
+                        <p className="text-xs text-muted-foreground">
+                          Kat {unit.kat}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <UnitPhotosGallery
+                        unitId={unit.id}
+                        nekretninaId={property?.id}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
+
+        {/* === PARKING TAB (read-only) === */}
+        {parkings.length > 0 && (
+          <TabsContent value="parking" className="space-y-4 mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  Parkirna mjesta ({parkings.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Oznaka</TableHead>
+                      <TableHead>Etaža</TableHead>
+                      <TableHead>Naziv</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Zakupnina</TableHead>
+                      <TableHead>Registracije</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {parkings.map((p) => {
+                      const activeContract = (ugovori || []).find(
+                        (c) =>
+                          (c.status === "aktivno" ||
+                            c.status === "na_isteku") &&
+                          Array.isArray(c.parking_ids) &&
+                          c.parking_ids.includes(p.id),
+                      );
+                      const tenant = activeContract
+                        ? (zakupnici || []).find(
+                            (z) => z.id === activeContract.zakupnik_id,
+                          )
+                        : null;
+                      const tenantLabel =
+                        tenant?.naziv_firme ||
+                        tenant?.ime_prezime ||
+                        activeContract?.zakupnik_naziv;
+                      return (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-medium">
+                            {p.internal_id}
+                          </TableCell>
+                          <TableCell>{p.floor}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {p.naziv || "—"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={
+                                p.status === "iznajmljeno"
+                                  ? "bg-sky-50 text-sky-700 border-sky-200"
+                                  : p.status === "rezervirano"
+                                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                                    : p.status === "u_odrzavanju"
+                                      ? "bg-slate-100 text-slate-700"
+                                      : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              }
+                            >
+                              {p.status === "iznajmljeno"
+                                ? "Iznajmljeno"
+                                : p.status === "rezervirano"
+                                  ? "Rezervirano"
+                                  : p.status === "u_odrzavanju"
+                                    ? "U održavanju"
+                                    : "Dostupno"}
+                            </Badge>
+                            {tenantLabel && (
+                              <div className="text-xs text-muted-foreground mt-1">
+                                {tenantLabel}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {p.osnovna_zakupnina != null
+                              ? formatCurrency(p.osnovna_zakupnina)
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {Array.isArray(p.vehicle_plates) &&
+                            p.vehicle_plates.length > 0
+                              ? p.vehicle_plates.join(", ")
+                              : "—"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+                <p className="text-xs text-muted-foreground mt-3">
+                  Za uređivanje, kliknite{" "}
+                  <span className="font-medium">Uredi</span> i otvorite tab
+                  Parking.
+                </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
 
         {/* === NAPOMENE TAB === */}
         <TabsContent value="napomene" className="space-y-4 mt-4">
@@ -1137,12 +1327,6 @@ const NekretninaDetailPage = () => {
           )}
         </TabsContent>
 
-        {/* === PARKING TAB === */}
-        {property.has_parking && (
-          <TabsContent value="parking" className="mt-4">
-            <ParkingTab nekretninaId={property.id} zakupnici={zakupnici} />
-          </TabsContent>
-        )}
       </Tabs>
 
       {/* Edit Dialog */}
@@ -1157,6 +1341,7 @@ const NekretninaDetailPage = () => {
           <NekretninarForm
             nekretnina={property}
             existingUnits={existingUnits}
+            existingParkings={existingParkings}
             onSubmit={handleSubmit}
             onCancel={() => setIsEditOpen(false)}
             submitting={submitting}

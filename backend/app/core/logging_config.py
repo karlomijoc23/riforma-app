@@ -45,5 +45,5 @@ def setup_logging(level: str = "INFO", fmt: str = "text") -> None:
     root.addHandler(handler)
 
     # Quiet noisy libraries
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

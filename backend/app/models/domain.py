@@ -40,6 +40,7 @@ class TenantMembershipStatus(str, Enum):
 
 class VrstaNekrtnine(str, Enum):
     POSLOVNA_ZGRADA = "poslovna_zgrada"
+    STAMBENI_OBJEKT = "stambeni_objekt"
     STAN = "stan"
     ZEMLJISTE = "zemljiste"
     OSTALO = "ostalo"
@@ -78,6 +79,7 @@ class TipDokumenta(str, Enum):
     PROCJENA_VRIJEDNOSTI = "procjena_vrijednosti"
     LOKACIJSKA_INFORMACIJA = "lokacijska_informacija"
     PRIMOPREDAJNI_ZAPISNIK = "primopredajni_zapisnik"
+    SLIKA_JEDINICE = "slika_jedinice"
     OSTALO = "ostalo"
 
 
@@ -111,6 +113,13 @@ class ApprovalStatus(str, Enum):
 
 
 class PropertyUnitStatus(str, Enum):
+    DOSTUPNO = "dostupno"
+    REZERVIRANO = "rezervirano"
+    IZNAJMLJENO = "iznajmljeno"
+    U_ODRZAVANJU = "u_odrzavanju"
+
+
+class ParkingStatus(str, Enum):
     DOSTUPNO = "dostupno"
     REZERVIRANO = "rezervirano"
     IZNAJMLJENO = "iznajmljeno"
@@ -173,6 +182,9 @@ class UserPublic(BaseModel):
     active: bool
     created_at: datetime
     updated_at: datetime
+    # Frontend uses this to intercept navigation and force a password change
+    # before showing any other screen.
+    must_change_password: bool = False
     memberships: Optional[List[UserMembershipDisplay]] = []
 
 
@@ -249,9 +261,11 @@ class ParkingSpace(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     nekretnina_id: str
     tenant_id: Optional[str] = None
-    zakupnik_id: Optional[str] = None
     floor: str  # Etaza (e.g. "-1", "-2", "0", "1")
     internal_id: str  # Interna oznaka
+    naziv: Optional[str] = None
+    status: ParkingStatus = ParkingStatus.DOSTUPNO
+    osnovna_zakupnina: Optional[float] = None
     vehicle_plates: List[str] = []  # Max 2 plates
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

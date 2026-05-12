@@ -79,7 +79,7 @@ def create_contract(
         ),
         "trajanje_mjeseci": overrides.pop("trajanje_mjeseci", 1),
         "osnovna_zakupnina": overrides.pop("osnovna_zakupnina", 500.0),
-        "zakupnina_po_m2": overrides.pop("zakupnina_po_m2", 10.0),
+        "zakupnina_po_m2": overrides.pop("zakupnina_po_m2", None),
         "cam_troskovi": overrides.pop("cam_troskovi", 50.0),
         "polog_depozit": overrides.pop("polog_depozit", 100.0),
         "garancija": overrides.pop("garancija", 0.0),

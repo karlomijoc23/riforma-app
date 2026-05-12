@@ -99,6 +99,21 @@ class ApprovalCommentBody(BaseModel):
     komentar: Optional[str] = None
 
 
+# --------------- Bill split ---------------
+
+
+class BillSplitBody(BaseModel):
+    """Request body for the split engine.
+
+    `unit_ids` lists the rentable units to split across; for the
+    ``custom_percent`` and ``manual_amount`` methods, ``values`` must
+    parallel that list (same length, same order).
+    """
+    method: str
+    unit_ids: list[str]
+    values: Optional[list[float]] = None
+
+
 # --------------- Email Templates ---------------
 
 # Shared inline styles for email templates (keep lines short)
@@ -339,6 +354,25 @@ async def create_racun(
     except ValueError:
         raise HTTPException(status_code=422, detail="Nevazeci tip utroska")
 
+    # Parse date strings into Python date objects. SQLAlchemy's SQLite
+    # backend rejects bare strings on Date columns; MariaDB tolerates them
+    # but the inconsistency makes tests flaky. Parse once, normalise.
+    def _parse_date_or_none(value: Optional[str]) -> Optional[date]:
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Datum '{value}' nije u ispravnom formatu (YYYY-MM-DD).",
+            )
+
+    parsed_datum_racuna = _parse_date_or_none(datum_racuna)
+    parsed_datum_dospijeca = _parse_date_or_none(datum_dospijeca)
+    parsed_period_od = _parse_date_or_none(period_od)
+    parsed_period_do = _parse_date_or_none(period_do)
+
     doc_id = str(uuid.uuid4())
     file_path = None
     original_filename = None
@@ -375,8 +409,8 @@ async def create_racun(
         "tip_utroska": tip_utroska,
         "dobavljac": dobavljac,
         "broj_racuna": broj_racuna,
-        "datum_racuna": datum_racuna,
-        "datum_dospijeca": datum_dospijeca,
+        "datum_racuna": parsed_datum_racuna,
+        "datum_dospijeca": parsed_datum_dospijeca,
         "iznos": iznos,
         "valuta": valuta,
         "nekretnina_id": nekretnina_id,
@@ -386,8 +420,8 @@ async def create_racun(
         "preknjizavanje_status": preknjizavanje_status,
         "preknjizavanje_napomena": preknjizavanje_napomena,
         "napomena": napomena,
-        "period_od": period_od,
-        "period_do": period_do,
+        "period_od": parsed_period_od,
+        "period_do": parsed_period_do,
         "potrosnja_kwh": potrosnja_kwh,
         "potrosnja_m3": potrosnja_m3,
         "file_path": file_path,
@@ -421,6 +455,165 @@ async def get_racuni_analytics(
         period_od=date.fromisoformat(period_od) if period_od else None,
         period_do=date.fromisoformat(period_do) if period_do else None,
     )
+
+
+@router.get(
+    "/analytics/cam-reconciliation",
+    dependencies=[Depends(deps.require_scopes("financials:read"))],
+)
+async def cam_reconciliation(
+    nekretnina_id: str,
+    godina: int,
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Year-over-year CAM-style reconciliation for one property.
+
+    Returns the per-utility totals for the requested year alongside the
+    previous year's totals so the user can see drift at a glance. This
+    is what landlords use at year-end to issue true-up charges/refunds
+    against the per-tenant CAM estimates.
+    """
+    from datetime import date as _date
+
+    def _bounds(year: int):
+        return _date(year, 1, 1), _date(year, 12, 31)
+
+    cur_from, cur_to = _bounds(godina)
+    prev_from, prev_to = _bounds(godina - 1)
+
+    cur_rows = await racuni.find_all(extra_conditions=[
+        RacuniRow.nekretnina_id == nekretnina_id,
+        RacuniRow.datum_racuna >= cur_from,
+        RacuniRow.datum_racuna <= cur_to,
+        # Don't double-count: master bills become children, count children only.
+        RacuniRow.is_master_bill.is_(False),
+    ])
+    prev_rows = await racuni.find_all(extra_conditions=[
+        RacuniRow.nekretnina_id == nekretnina_id,
+        RacuniRow.datum_racuna >= prev_from,
+        RacuniRow.datum_racuna <= prev_to,
+        RacuniRow.is_master_bill.is_(False),
+    ])
+
+    def _aggregate(rows):
+        out: Dict[str, Dict[str, float]] = {}
+        for r in rows:
+            tip = r.tip_utroska or "ostalo"
+            entry = out.setdefault(tip, {"iznos": 0.0, "broj_racuna": 0})
+            entry["iznos"] += float(r.iznos or 0)
+            entry["broj_racuna"] += 1
+        return out
+
+    cur = _aggregate(cur_rows)
+    prev = _aggregate(prev_rows)
+
+    by_utility = []
+    for tip in sorted(set(cur.keys()) | set(prev.keys())):
+        cur_amount = round(cur.get(tip, {}).get("iznos", 0.0), 2)
+        prev_amount = round(prev.get(tip, {}).get("iznos", 0.0), 2)
+        delta = round(cur_amount - prev_amount, 2)
+        delta_pct = (
+            round((delta / prev_amount) * 100, 1)
+            if prev_amount > 0
+            else None
+        )
+        by_utility.append({
+            "tip_utroska": tip,
+            "godina_amount": cur_amount,
+            "prev_godina_amount": prev_amount,
+            "delta": delta,
+            "delta_pct": delta_pct,
+            "broj_racuna": cur.get(tip, {}).get("broj_racuna", 0),
+        })
+
+    total_cur = round(sum(u["godina_amount"] for u in by_utility), 2)
+    total_prev = round(sum(u["prev_godina_amount"] for u in by_utility), 2)
+    return {
+        "nekretnina_id": nekretnina_id,
+        "godina": godina,
+        "total_godina": total_cur,
+        "total_prev_godina": total_prev,
+        "delta": round(total_cur - total_prev, 2),
+        "delta_pct": (
+            round(((total_cur - total_prev) / total_prev) * 100, 1)
+            if total_prev > 0
+            else None
+        ),
+        "by_utility": by_utility,
+    }
+
+
+@router.get(
+    "/analytics/anomalies",
+    dependencies=[Depends(deps.require_scopes("financials:read"))],
+)
+async def detect_bill_anomalies(
+    threshold_pct: float = 30.0,
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Find bills whose amount is more than `threshold_pct` % above the
+    rolling 12-month average for the same property + utility type.
+
+    This is the "struja je 35% veća nego inače — provjeri curi li negdje"
+    early-warning signal. Cheap to compute (one pass through the bills
+    table) and very actionable.
+    """
+    from collections import defaultdict
+    from datetime import timedelta
+
+    today = date.today()
+    cutoff_recent = today - timedelta(days=90)
+    cutoff_baseline = today - timedelta(days=365)
+
+    rows = await racuni.find_all(extra_conditions=[
+        RacuniRow.datum_racuna >= cutoff_baseline,
+        RacuniRow.is_master_bill.is_(False),
+        RacuniRow.iznos > 0,
+    ])
+
+    # Group by (nekretnina, tip) → bills in baseline window
+    baseline: Dict[tuple, List[float]] = defaultdict(list)
+    recent: List[Any] = []
+    for r in rows:
+        if not r.nekretnina_id or not r.datum_racuna:
+            continue
+        key = (r.nekretnina_id, r.tip_utroska or "ostalo")
+        baseline[key].append(float(r.iznos))
+        if r.datum_racuna >= cutoff_recent:
+            recent.append(r)
+
+    anomalies: List[Dict[str, Any]] = []
+    for r in recent:
+        key = (r.nekretnina_id, r.tip_utroska or "ostalo")
+        history = [v for v in baseline[key] if v != float(r.iznos or 0)]
+        # Need at least 2 historical points to claim "average".
+        if len(history) < 2:
+            continue
+        avg = sum(history) / len(history)
+        if avg <= 0:
+            continue
+        pct_over = ((float(r.iznos or 0) - avg) / avg) * 100
+        if pct_over >= threshold_pct:
+            anomalies.append({
+                "racun_id": r.id,
+                "broj_racuna": r.broj_racuna,
+                "tip_utroska": r.tip_utroska,
+                "dobavljac": r.dobavljac,
+                "datum_racuna": r.datum_racuna.isoformat() if r.datum_racuna else None,
+                "iznos": round(float(r.iznos or 0), 2),
+                "rolling_average": round(avg, 2),
+                "pct_over_average": round(pct_over, 1),
+                "nekretnina_id": r.nekretnina_id,
+            })
+
+    anomalies.sort(key=lambda a: a["pct_over_average"], reverse=True)
+    return {
+        "threshold_pct": threshold_pct,
+        "window_recent_days": 90,
+        "window_baseline_days": 365,
+        "count": len(anomalies),
+        "anomalies": anomalies,
+    }
 
 
 @router.get(
@@ -494,6 +687,118 @@ async def get_racun(
     if not item:
         raise HTTPException(status_code=404, detail="Racun nije pronadjen")
     return _normalize_file_path(racuni.to_dict(item))
+
+
+# --------------- Bill split endpoints ---------------
+
+
+@router.post(
+    "/{id}/split-preview",
+    dependencies=[Depends(deps.require_scopes("financials:update"))],
+)
+async def preview_bill_split(
+    id: str,
+    body: BillSplitBody,
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Compute a per-unit breakdown without writing anything. Lets the
+    UI show a live preview as the user adjusts the allocation."""
+    from app.services.bill_split_service import (
+        BillSplitMethod,
+        compute_split,
+    )
+
+    master = await racuni.get_by_id(id)
+    if not master:
+        raise HTTPException(status_code=404, detail="Racun nije pronadjen")
+    try:
+        method = BillSplitMethod(body.method)
+    except ValueError:
+        raise HTTPException(
+            status_code=422, detail=f"Nepoznat način podjele: {body.method}"
+        )
+
+    breakdown = await compute_split(master, method, body.unit_ids, body.values)
+    return {
+        "master_amount": float(master.iznos or 0),
+        "breakdown": breakdown,
+        "total": round(sum(b["amount"] for b in breakdown), 2),
+    }
+
+
+@router.post(
+    "/{id}/split",
+    dependencies=[
+        Depends(deps.require_scopes("financials:update")),
+        Depends(deps.require_tenant()),
+    ],
+)
+async def split_bill(
+    id: str,
+    body: BillSplitBody,
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Materialise the split — create one child Račun per unit. Refuses
+    if the master is already split (call DELETE first to redo)."""
+    from app.services.bill_split_service import BillSplitMethod, apply_split
+
+    master = await racuni.get_by_id(id)
+    if not master:
+        raise HTTPException(status_code=404, detail="Racun nije pronadjen")
+    try:
+        method = BillSplitMethod(body.method)
+    except ValueError:
+        raise HTTPException(
+            status_code=422, detail=f"Nepoznat način podjele: {body.method}"
+        )
+
+    children = await apply_split(
+        master, method, body.unit_ids, body.values, current_user["id"]
+    )
+    return {
+        "master_id": id,
+        "children": [_normalize_file_path(racuni.to_dict(c)) for c in children],
+    }
+
+
+@router.get(
+    "/{id}/children",
+    dependencies=[Depends(deps.require_scopes("financials:read"))],
+)
+async def get_bill_children(
+    id: str,
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Return all child bills generated from this master."""
+    from app.services.bill_split_service import list_children
+
+    master = await racuni.get_by_id(id)
+    if not master:
+        raise HTTPException(status_code=404, detail="Racun nije pronadjen")
+    children = await list_children(id)
+    return [_normalize_file_path(racuni.to_dict(c)) for c in children]
+
+
+@router.delete(
+    "/{id}/split",
+    dependencies=[
+        Depends(deps.require_scopes("financials:update")),
+        Depends(deps.require_tenant()),
+    ],
+)
+async def remove_bill_split(
+    id: str,
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Undo a split — delete every child and clear the master flag.
+    Refuses if any child has recorded payments."""
+    from app.services.bill_split_service import remove_split
+
+    master = await racuni.get_by_id(id)
+    if not master:
+        raise HTTPException(status_code=404, detail="Racun nije pronadjen")
+    deleted = await remove_split(master)
+    return {"deleted_children": deleted}
 
 
 @router.put(
@@ -1025,3 +1330,181 @@ async def parse_racun_ai(
     except Exception as e:
         logger.error(f"AI racun parsing failed: {e}")
         raise HTTPException(status_code=500, detail="Greska pri AI analizi racuna")
+
+
+# ---------------------------------------------------------------------------
+# AI auto-save: upload + parse + create draft in one round-trip
+# ---------------------------------------------------------------------------
+
+
+def _extract_pdf_text(file_path: str) -> str:
+    if PdfReader is None:
+        raise HTTPException(status_code=500, detail="pypdf nije instaliran")
+    try:
+        reader = PdfReader(file_path)
+        text = ""
+        for page in reader.pages[:5]:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        return text
+    except Exception as e:
+        logger.error("PDF read failed: %s", e)
+        raise HTTPException(status_code=400, detail="Greska pri citanju PDF-a")
+
+
+def _ai_parse_bill_text(text: str) -> Dict[str, Any]:
+    """Send PDF text to Claude, parse JSON response. Returns mock data
+    if no API key configured — useful for dev / smoke tests."""
+    client = _get_anthropic_client()
+    if client is None:
+        return {
+            "dobavljac": "Mock Dobavljac d.o.o.",
+            "broj_racuna": "MOCK-2026-001",
+            "datum_racuna": date.today().isoformat(),
+            "datum_dospijeca": date.today().isoformat(),
+            "iznos": 100.0,
+            "valuta": "EUR",
+            "tip_utroska": "ostalo",
+            "_source": "fallback",
+        }
+
+    json_structure = """
+    {
+        "dobavljac": "string", "broj_racuna": "string",
+        "datum_racuna": "YYYY-MM-DD", "datum_dospijeca": "YYYY-MM-DD",
+        "iznos": "number", "valuta": "string",
+        "tip_utroska": "struja|voda|plin|komunalije|internet|ostalo",
+        "period_od": "YYYY-MM-DD or null", "period_do": "YYYY-MM-DD or null",
+        "potrosnja_kwh": "number or null", "potrosnja_m3": "number or null"
+    }
+    """
+    response = client.messages.create(
+        model=CLAUDE_TEXT_MODEL,
+        max_tokens=1024,
+        system=(
+            "Ti si asistent za analizu racuna za komunalne usluge i energente. "
+            "Vracas iskljucivo validan JSON bez ikakvih dodatnih objasnjenja."
+        ),
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Analiziraj tekst racuna i izvuci podatke u JSON formatu:\n"
+                f"{json_structure}\n\nTekst racuna:\n{text[:6000]}"
+            ),
+        }],
+        temperature=0,
+    )
+    content = response.content[0].text.strip()
+    for fence in ("```json", "```"):
+        if content.startswith(fence):
+            content = content[len(fence):]
+        if content.endswith("```"):
+            content = content[:-3]
+    content = content.strip()
+    return json.loads(content)
+
+
+@router.post(
+    "/parse-and-create",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(deps.require_scopes("financials:create")),
+        Depends(deps.require_tenant()),
+    ],
+)
+async def parse_and_create_bill(
+    nekretnina_id: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+    current_user: Dict[str, Any] = Depends(deps.get_current_user),
+):
+    """Upload a PDF supplier invoice → AI extracts fields → DRAFT bill is
+    created automatically. The user only needs to review and approve.
+
+    Cuts ~5 minutes per bill compared to the existing two-step flow
+    (upload then run /parse-ai then manually fill the form).
+    """
+    if not file or not file.filename:
+        raise HTTPException(status_code=422, detail="Datoteka je obavezna.")
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=422, detail=f"Nedozvoljeni tip datoteke: {ext}"
+        )
+
+    contents = await file.read()
+    if len(contents) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Datoteka prevelika (>{MAX_FILE_SIZE_MB}MB).",
+        )
+
+    # Save the file first so the parsed data has an attachment to point at.
+    doc_id = str(uuid.uuid4())
+    safe_name = _sanitize_filename(file.filename)
+    settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    dest = settings.UPLOAD_DIR / f"{doc_id}_{safe_name}"
+    with dest.open("wb") as buf:
+        buf.write(contents)
+
+    text = _extract_pdf_text(str(dest))
+    if len(text.strip()) < 20:
+        # Don't fail — create an empty draft so user can fill manually.
+        parsed: Dict[str, Any] = {"_source": "no_text"}
+    else:
+        try:
+            parsed = _ai_parse_bill_text(text)
+        except json.JSONDecodeError:
+            parsed = {"_source": "ai_invalid_json"}
+        except Exception as e:
+            logger.warning("AI parsing failed in parse-and-create: %s", e)
+            parsed = {"_source": "ai_error"}
+
+    # Validate / coerce parsed values to safe defaults.
+    def _safe_date(v: Any) -> Optional[date]:
+        if not v:
+            return None
+        try:
+            return date.fromisoformat(str(v))
+        except Exception:
+            return None
+
+    def _safe_float(v: Any) -> float:
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    tip = parsed.get("tip_utroska") or "ostalo"
+    try:
+        UtilityType(tip)
+    except ValueError:
+        tip = "ostalo"
+
+    doc_data = {
+        "id": doc_id,
+        "tip_utroska": tip,
+        "dobavljac": parsed.get("dobavljac") or "",
+        "broj_racuna": parsed.get("broj_racuna") or "",
+        "datum_racuna": _safe_date(parsed.get("datum_racuna")),
+        "datum_dospijeca": _safe_date(parsed.get("datum_dospijeca")),
+        "iznos": _safe_float(parsed.get("iznos")),
+        "valuta": parsed.get("valuta") or "EUR",
+        "nekretnina_id": nekretnina_id,
+        "period_od": _safe_date(parsed.get("period_od")),
+        "period_do": _safe_date(parsed.get("period_do")),
+        "potrosnja_kwh": _safe_float(parsed.get("potrosnja_kwh")) or None,
+        "potrosnja_m3": _safe_float(parsed.get("potrosnja_m3")) or None,
+        "file_path": str(dest),
+        "original_filename": file.filename,
+        "content_type": file.content_type,
+        # Start as draft so the user reviews before it counts as a real bill.
+        "approval_status": "draft",
+        "status_placanja": "ceka_placanje",
+        "created_by": current_user["id"],
+    }
+    created = await racuni.create(doc_data)
+    return {
+        "bill": _normalize_file_path(racuni.to_dict(created)),
+        "ai_extraction": parsed,
+    }

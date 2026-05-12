@@ -5,147 +5,218 @@
     <title>Ugovor o zakupu</title>
     <style>
       :root {
-        --brand-primary: #1d3557;
-        --brand-accent: #457b9d;
-        --border-color: #dfe6ed;
-        --text-color: #1b1d21;
-        --muted-color: #6c757d;
-        --font-base: 'Helvetica', Arial, sans-serif;
+        --color-primary: #0f5e4d;
+        --color-primary-dark: #0b4237;
+        --color-accent: #00c08b;
+        --color-ink: #0e1116;
+        --color-ink-soft: #4a5660;
+        --color-muted: #7a8a93;
+        --color-subtle: rgba(15, 94, 77, 0.06);
+        --color-border: rgba(15, 94, 77, 0.18);
+        --color-border-strong: rgba(15, 94, 77, 0.32);
+      }
+
+      @page {
+        size: A4 portrait;
+        margin: 18mm 18mm 20mm 18mm;
+        @bottom-left {
+          content: "Riforma · Ugovor o zakupu";
+          font-family: 'Helvetica Neue', 'Helvetica', Arial, sans-serif;
+          font-size: 8pt;
+          color: #9aa3ad;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+        }
+        @bottom-right {
+          content: "Stranica " counter(page) " / " counter(pages);
+          font-family: 'Helvetica Neue', 'Helvetica', Arial, sans-serif;
+          font-size: 8pt;
+          color: #9aa3ad;
+        }
       }
 
       body {
         margin: 0;
-        padding: 48px 56px 60px;
-        font-family: var(--font-base);
-        color: var(--text-color);
+        font-family: 'Helvetica Neue', 'Helvetica', Arial, sans-serif;
+        color: var(--color-ink);
+        font-size: 10.5pt;
         line-height: 1.6;
         background: #ffffff;
       }
 
-      header {
+      header.doc-head {
         display: flex;
         justify-content: space-between;
         align-items: flex-end;
-        border-bottom: 2px solid var(--brand-primary);
-        padding-bottom: 14px;
-        margin-bottom: 32px;
+        padding-bottom: 6mm;
+        border-bottom: 2px solid var(--color-primary);
+        margin-bottom: 8mm;
       }
 
       .brand-block {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 1mm;
       }
 
       .brand-name {
         font-weight: 700;
-        font-size: 20px;
+        font-size: 16pt;
         letter-spacing: 0.06em;
         text-transform: uppercase;
-        color: var(--brand-primary);
+        color: var(--color-primary);
       }
 
       .brand-subtitle {
-        font-size: 11px;
-        color: var(--muted-color);
-        letter-spacing: 0.08em;
+        font-size: 8.5pt;
+        color: var(--color-muted);
+        letter-spacing: 0.12em;
         text-transform: uppercase;
       }
 
       .document-meta {
         text-align: right;
-        font-size: 11px;
-        color: var(--muted-color);
+        font-size: 9pt;
+        color: var(--color-muted);
+        line-height: 1.55;
       }
 
       .badge {
         display: inline-block;
-        padding: 4px 10px;
+        padding: 1mm 3mm;
         border-radius: 999px;
-        border: 1px solid var(--brand-accent);
-        color: var(--brand-accent);
-        font-size: 10px;
-        letter-spacing: 0.06em;
+        background: var(--color-accent);
+        color: #ffffff;
+        font-size: 8pt;
+        font-weight: 600;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
+        margin-bottom: 2mm;
       }
 
       h1 {
-        font-size: 26px;
-        letter-spacing: 0.08em;
+        font-size: 20pt;
+        letter-spacing: 0.04em;
         text-transform: uppercase;
-        margin: 0 0 12px;
-        color: var(--brand-primary);
+        margin: 0 0 6mm 0;
+        color: var(--color-primary);
+        font-weight: 600;
+      }
+
+      .intro {
+        font-size: 10.5pt;
+        color: var(--color-ink-soft);
+        margin-bottom: 8mm;
       }
 
       h2 {
-        font-size: 14px;
+        font-size: 10pt;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin: 28px 0 12px;
-        color: var(--brand-accent);
+        letter-spacing: 0.16em;
+        margin: 8mm 0 3mm 0;
+        color: var(--color-primary);
+        padding-bottom: 1.5mm;
+        border-bottom: 1px solid var(--color-border);
+        font-weight: 700;
+      }
+
+      section.section {
+        margin-top: 4mm;
+        page-break-inside: avoid;
+      }
+
+      section.section > div {
+        white-space: pre-wrap;
       }
 
       p {
-        margin: 0 0 10px;
+        margin: 0 0 3mm 0;
       }
 
-      ul {
-        margin: 0 0 12px 24px;
+      ul, ol {
+        margin: 0 0 3mm 6mm;
+        padding: 0;
       }
 
-      .section {
-        margin-top: 20px;
+      li {
+        margin-bottom: 1mm;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 10pt;
+        margin: 2mm 0;
+      }
+
+      table td, table th {
+        padding: 2.5mm 3mm;
+        border-bottom: 1px solid var(--color-border);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      table th {
+        background: var(--color-subtle);
+        color: var(--color-primary);
+        font-size: 8.5pt;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 700;
       }
 
       .signature-block {
         display: flex;
         justify-content: space-between;
-        gap: 56px;
-        margin-top: 60px;
+        gap: 20mm;
+        margin-top: 24mm;
+        page-break-inside: avoid;
       }
 
       .signature {
         flex: 1;
         text-align: center;
-        font-size: 12px;
+        font-size: 10pt;
+        color: var(--color-ink-soft);
       }
 
       .signature::before {
         content: '';
         display: block;
-        height: 56px;
-        border-bottom: 1px solid var(--border-color);
-        margin-bottom: 10px;
+        height: 18mm;
+        border-bottom: 1px solid var(--color-border-strong);
+        margin-bottom: 3mm;
       }
 
       footer {
-        margin-top: 64px;
-        font-size: 10px;
-        color: var(--muted-color);
-        border-top: 1px solid var(--border-color);
-        padding-top: 12px;
+        margin-top: 14mm;
+        font-size: 8.5pt;
+        color: var(--color-muted);
+        border-top: 1px solid var(--color-border);
+        padding-top: 3mm;
+        line-height: 1.5;
       }
     </style>
   </head>
   <body>
-    <header>
+    <header class="doc-head">
       <div class="brand-block">
         <div class="brand-name">{{BRAND_NAME}}</div>
         <div class="brand-subtitle">{{BRAND_SUBTITLE}}</div>
       </div>
       <div class="document-meta">
         <div class="badge">Ugovor o zakupu</div>
-        <div>Referenca: {{CONTRACT_REFERENCE}}</div>
-        <div>Generirano: {{GENERATED_AT}}</div>
+        <div><strong style="color:var(--color-ink);">Ref:</strong> {{CONTRACT_REFERENCE}}</div>
+        <div>Generirano · {{GENERATED_AT}}</div>
       </div>
     </header>
 
     <main>
       <h1>{{TITLE}}</h1>
-      <p>{{INTRO}}</p>
+      <p class="intro">{{INTRO}}</p>
 
       <section class="section">
-        <h2>Strane</h2>
+        <h2>Ugovorne strane</h2>
         <div>{{PARTIES}}</div>
       </section>
 

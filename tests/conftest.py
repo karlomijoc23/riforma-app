@@ -9,7 +9,6 @@ from httpx import ASGITransport, AsyncClient
 
 os.environ.setdefault("AUTH_SECRET", "test-secret")
 os.environ.setdefault("USE_IN_MEMORY_DB", "true")
-os.environ.setdefault("OPENAI_API_KEY", "test")
 os.environ.setdefault("AUTO_RUN_MIGRATIONS", "false")
 os.environ.setdefault("SEED_ADMIN_ON_STARTUP", "false")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")

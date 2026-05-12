@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="hr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mjesečni izvještaj — {{ period_label or "Riforma" }}</title>
+    {% include "partials/_base_styles.html" %}
+    <style>
+      .two-col { display: flex; gap: 6mm; align-items: stretch; }
+      .two-col > * { flex: 1; }
+
+      .summary-banner {
+        background: linear-gradient(135deg, var(--color-subtle), rgba(0, 192, 139, 0.06));
+        border: 1px solid var(--color-border);
+        border-left: 4px solid var(--color-accent);
+        border-radius: var(--radius-md);
+        padding: 5mm 6mm;
+        margin: 4mm 0 6mm 0;
+      }
+      .summary-banner__label {
+        font-size: 8pt;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        color: var(--color-accent);
+        font-weight: 700;
+        margin-bottom: 2mm;
+      }
+      .summary-banner p {
+        margin: 0;
+        font-size: 10.5pt;
+        line-height: 1.55;
+        color: var(--color-ink);
+      }
+
+      .fin-table { width: 100%; border-collapse: collapse; font-size: 10pt; }
+      .fin-table td {
+        padding: 3mm 0;
+        border-bottom: 1px dashed var(--color-border);
+      }
+      .fin-table td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .fin-table tr.total td {
+        border-bottom: 0;
+        border-top: 2px solid var(--color-primary);
+        padding-top: 4mm;
+        color: var(--color-primary);
+        font-weight: 700;
+      }
+
+      .alert-row {
+        margin-top: 4mm;
+        background: var(--status-danger-bg);
+        border: 1px solid var(--status-danger-bd);
+        border-radius: var(--radius-md);
+        padding: 3mm 4mm;
+        display: flex;
+        justify-content: space-between;
+        font-size: 9.5pt;
+        color: var(--status-danger-fg);
+      }
+      .alert-row strong { font-weight: 700; }
+
+      .ai-comment {
+        background: var(--color-subtle);
+        border-radius: var(--radius-md);
+        padding: 4mm 5mm;
+        font-size: 9.5pt;
+        line-height: 1.55;
+        height: 100%;
+        box-sizing: border-box;
+      }
+      .ai-comment__label {
+        font-size: 8pt;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: var(--color-primary);
+        font-weight: 700;
+        margin-bottom: 2mm;
+      }
+
+      .occ-summary {
+        display: flex;
+        align-items: baseline;
+        gap: 3mm;
+      }
+      .occ-summary__big {
+        font-size: 22pt;
+        font-weight: 600;
+        color: var(--color-primary);
+        line-height: 1;
+      }
+      .occ-summary__sub { font-size: 9pt; color: var(--color-muted); }
+
+      .occ-bar {
+        height: 3mm;
+        background: var(--color-subtle);
+        border-radius: 1.5mm;
+        overflow: hidden;
+        margin: 3mm 0;
+      }
+      .occ-bar > span {
+        display: block; height: 100%;
+        background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+      }
+      .occ-bar.warn > span   { background: linear-gradient(90deg, #d97706, #f59e0b); }
+      .occ-bar.danger > span { background: linear-gradient(90deg, #b42318, #dc2626); }
+
+      .priority-badge {
+        display: inline-block;
+        padding: 0.6mm 2.5mm;
+        border-radius: 999px;
+        font-size: 7.5pt;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        border: 1px solid;
+      }
+      .priority-visoki { background: var(--status-danger-bg); color: var(--status-danger-fg); border-color: var(--status-danger-bd); }
+      .priority-srednji { background: var(--status-warn-bg);  color: var(--status-warn-fg);  border-color: var(--status-warn-bd); }
+      .priority-niski   { background: var(--status-info-bg);  color: var(--status-info-fg);  border-color: var(--status-info-bd); }
+      .priority-nisko   { background: var(--status-info-bg);  color: var(--status-info-fg);  border-color: var(--status-info-bd); }
+
+      .recommendations { padding-left: 5mm; margin: 0; }
+      .recommendations li { margin: 2.5mm 0; font-size: 10pt; line-height: 1.5; }
+
+      .tech-grid { width: 100%; border-collapse: separate; border-spacing: 4mm 4mm; }
+      .tech-grid td {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 4mm 5mm;
+        vertical-align: top;
+        width: 50%;
+      }
+      .tech-grid__head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2mm;
+      }
+      .tech-grid__name {
+        font-weight: 700;
+        font-size: 10pt;
+        color: var(--color-primary);
+      }
+      .tech-grid__desc { font-size: 9.5pt; line-height: 1.5; color: var(--color-ink); }
+    </style>
+  </head>
+  <body>
+    <header class="report-head">
+      <p class="report-head__eyebrow">Mjesečni izvještaj</p>
+      <h1 class="report-head__title">Portfelj · {{ period_label or "" }}</h1>
+      <p class="report-head__subtitle">AI-pomognut pregled prihoda, popunjenosti, održavanja i preporuka.</p>
+      <div class="report-head__meta">
+        Datum izvještaja
+        <strong>{{ generated_at }}</strong>
+        {% if source %}<div style="margin-top:1mm;font-size:8pt;">Izvor · {{ source_label }}</div>{% endif %}
+      </div>
+      <div class="report-head__accent-bar"></div>
+    </header>
+
+    {% if report.sazetak %}
+    <div class="summary-banner">
+      <div class="summary-banner__label">Sažetak</div>
+      <p>{{ report.sazetak }}</p>
+    </div>
+    {% endif %}
+
+    {% if report.financijski_pregled %}
+    {% set fin = report.financijski_pregled %}
+    {% set occ = report.popunjenost %}
+    <h2 class="section-title">Ključni pokazatelji</h2>
+    <table class="kpi-grid no-break">
+      <tr>
+        <td class="kpi--accent">
+          <p class="kpi__label">Mjesečni prihod</p>
+          <div class="kpi__value">{{ fin.mjesecni_prihod | currency }}</div>
+        </td>
+        <td class="kpi--positive">
+          <p class="kpi__label">Godišnji prihod</p>
+          <div class="kpi__value">{{ fin.godisnji_prihod | currency }}</div>
+        </td>
+        <td class="kpi--info">
+          <p class="kpi__label">Popunjenost</p>
+          <div class="kpi__value">{% if occ %}{{ occ.postotak }} %{% else %}—{% endif %}</div>
+          {% if occ %}<p class="kpi__sub">{{ occ.iznajmljeno }} / {{ occ.ukupno }} jedinica</p>{% endif %}
+        </td>
+        <td>
+          <p class="kpi__label">Neto prihod</p>
+          <div class="kpi__value">{{ fin.neto_prihod | currency }}</div>
+          <p class="kpi__sub">Troškovi {{ fin.ukupni_troskovi | currency }}</p>
+        </td>
+      </tr>
+    </table>
+
+    <h2 class="section-title">Financijski pregled</h2>
+    <div class="two-col">
+      <div>
+        <table class="fin-table">
+          <tr><td>Ukupni prihod</td><td>{{ fin.mjesecni_prihod | currency }}</td></tr>
+          <tr><td>Ukupni troškovi</td><td>{{ fin.ukupni_troskovi | currency }}</td></tr>
+          <tr class="total"><td>Neto prihod</td><td>{{ fin.neto_prihod | currency }}</td></tr>
+        </table>
+        {% if fin.neplaceni_racuni and fin.neplaceni_racuni > 0 %}
+        <div class="alert-row"><span>Neplaćeni računi</span><strong>{{ fin.neplaceni_racuni | currency }}</strong></div>
+        {% endif %}
+      </div>
+      {% if fin.komentar %}
+      <div>
+        <div class="ai-comment">
+          <div class="ai-comment__label">AI komentar</div>
+          {{ fin.komentar }}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if report.popunjenost %}
+    {% set occ = report.popunjenost %}
+    <h2 class="section-title">Popunjenost</h2>
+    <div class="two-col">
+      <div>
+        <div class="occ-summary">
+          <span class="occ-summary__big">{{ occ.postotak }} %</span>
+          <span class="occ-summary__sub">{{ occ.iznajmljeno }} / {{ occ.ukupno }} jedinica</span>
+        </div>
+        <div class="occ-bar {% if occ.postotak < 50 %}danger{% elif occ.postotak < 80 %}warn{% endif %}">
+          <span style="width: {{ occ.postotak | clamp_pct }}%;"></span>
+        </div>
+        {% if occ.trend %}
+        <div style="margin-top:3mm;font-size:9.5pt;"><span class="text-muted">Trend:</span> <strong>{{ occ.trend }}</strong></div>
+        {% endif %}
+      </div>
+      {% if occ.komentar %}
+      <div>
+        <div class="ai-comment">
+          <div class="ai-comment__label">AI komentar</div>
+          {{ occ.komentar }}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if report.odrzavanje %}
+    {% set maint = report.odrzavanje %}
+    <h2 class="section-title">Održavanje</h2>
+    <table class="kpi-grid">
+      <tr>
+        <td>
+          <p class="kpi__label">Otvoreni nalozi</p>
+          <div class="kpi__value">{{ maint.otvoreni_nalozi or 0 }}</div>
+        </td>
+        <td {% if maint.kriticni_nalozi and maint.kriticni_nalozi > 0 %}style="background: var(--status-danger-bg); border-color: var(--status-danger-bd);"{% endif %}>
+          <p class="kpi__label" {% if maint.kriticni_nalozi and maint.kriticni_nalozi > 0 %}style="color:var(--status-danger-fg);"{% endif %}>Kritični nalozi</p>
+          <div class="kpi__value" {% if maint.kriticni_nalozi and maint.kriticni_nalozi > 0 %}style="color:var(--status-danger-fg);"{% endif %}>{{ maint.kriticni_nalozi or 0 }}</div>
+        </td>
+        {% if maint.preporuka %}
+        <td>
+          <p class="kpi__label">AI preporuka</p>
+          <div style="font-size:9pt;line-height:1.5;color:var(--color-ink);">{{ maint.preporuka }}</div>
+        </td>
+        {% endif %}
+      </tr>
+    </table>
+    {% endif %}
+
+    {% if report.ugovorni_rizici and report.ugovorni_rizici|length > 0 %}
+    <h2 class="section-title">Ugovorni rizici</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:24%">Tip</th>
+          <th>Opis</th>
+          <th style="width:14%">Prioritet</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rizik in report.ugovorni_rizici %}
+        <tr>
+          <td class="fw-semibold">{{ rizik.tip }}</td>
+          <td>{{ rizik.opis }}</td>
+          <td><span class="priority-badge priority-{{ rizik.prioritet or 'nisko' }}">{{ priority_label(rizik.prioritet) }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if report.preporuke and report.preporuke|length > 0 %}
+    <h2 class="section-title">Preporuke</h2>
+    <div class="panel panel--accent">
+      <ol class="recommendations">
+        {% for preporuka in report.preporuke %}
+        <li>{{ preporuka }}</li>
+        {% endfor %}
+      </ol>
+    </div>
+    {% endif %}
+
+    {% if report.tech_prijedlozi and report.tech_prijedlozi|length > 0 %}
+    <h2 class="section-title">Tehnološki prijedlozi</h2>
+    <table class="tech-grid">
+      {% for row in report.tech_prijedlozi | batch(2) %}
+      <tr>
+        {% for prijedlog in row %}
+        <td>
+          <div class="tech-grid__head">
+            <span class="tech-grid__name">{{ prijedlog.naziv }}</span>
+            <span class="priority-badge priority-{{ prijedlog.prioritet or 'nisko' }}">{{ priority_label(prijedlog.prioritet) }}</span>
+          </div>
+          <div class="tech-grid__desc">{{ prijedlog.opis }}</div>
+        </td>
+        {% endfor %}
+        {% if row|length == 1 %}<td style="background:transparent;border:none;"></td>{% endif %}
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  </body>
+</html>

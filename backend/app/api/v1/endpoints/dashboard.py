@@ -1,9 +1,9 @@
 import asyncio
-import time
 from collections import defaultdict
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict
 
 from app.api import deps
+from app.db import dashboard_cache
 from app.db.repositories.instance import (
     nekretnine,
     zakupnici,
@@ -17,27 +17,27 @@ from fastapi import APIRouter, Depends
 
 router = APIRouter()
 
-# Simple in-memory cache: (tenant_id) -> (timestamp, data)
-_dashboard_cache: Dict[str, Tuple[float, dict]] = {}
-_CACHE_TTL_SECONDS = 30  # refresh every 30s
+# Only the lock stays local — the cache moved to `app.db.dashboard_cache`
+# so write paths in BaseRepository can invalidate it without importing the
+# endpoint module (which would cycle through deps/auth).
 _dashboard_lock = asyncio.Lock()
 
 
-@router.get("", dependencies=[Depends(deps.require_scopes("reports:read"))])
+@router.get("", dependencies=[Depends(deps.require_scopes("kpi:read"))])
 async def get_dashboard_stats(
     current_user: Dict[str, Any] = Depends(deps.get_current_user),
 ):
     # Check TTL cache to avoid full-table scans on every page load
     tenant_id = CURRENT_TENANT_ID.get() or "__global__"
-    cached = _dashboard_cache.get(tenant_id)
-    if cached and (time.monotonic() - cached[0]) < _CACHE_TTL_SECONDS:
-        return cached[1]
+    cached = dashboard_cache.get(tenant_id)
+    if cached is not None:
+        return cached
 
     async with _dashboard_lock:
         # Double-check after acquiring lock
-        cached = _dashboard_cache.get(tenant_id)
-        if cached and (time.monotonic() - cached[0]) < _CACHE_TTL_SECONDS:
-            return cached[1]
+        cached = dashboard_cache.get(tenant_id)
+        if cached is not None:
+            return cached
 
         # -- Load all data in parallel (SQL aggregations) -------------------
         (
@@ -140,5 +140,5 @@ async def get_dashboard_stats(
             "pending_bill_approvals": pending_bill_approvals,
         }
 
-        _dashboard_cache[tenant_id] = (time.monotonic(), result)
+        dashboard_cache.set_cached(tenant_id, result)
         return result

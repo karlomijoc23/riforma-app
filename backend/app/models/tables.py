@@ -14,6 +14,7 @@ from typing import Any, List, Optional
 import sqlalchemy as sa
 from sqlalchemy import (
     Boolean,
+    Column,
     Date,
     DateTime,
     Float,
@@ -21,6 +22,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Table,
     Text,
     UniqueConstraint,
 )
@@ -41,6 +43,86 @@ def _utcnow() -> datetime:
 def _new_uuid() -> str:
     """Generate a new UUID4 string suitable for use as a PK."""
     return str(uuid.uuid4())
+
+
+# ---------------------------------------------------------------------------
+# Many-to-many: a contract can cover one or more rentable units.
+#
+# The legacy `UgovoriRow.property_unit_id` column is kept as the "primary
+# unit" pointer so deprecated reads keep working. Source of truth for the
+# full unit set is this junction table — overlap checks, status sync and
+# rent computation iterate over it.
+# ---------------------------------------------------------------------------
+ugovor_units = Table(
+    "ugovor_units",
+    Base.metadata,
+    Column(
+        "ugovor_id",
+        String(36),
+        ForeignKey("ugovori.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "property_unit_id",
+        String(36),
+        ForeignKey("property_units.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("created_at", DateTime(timezone=True), default=_utcnow, nullable=False),
+    Index("ix_ugovor_units_unit", "property_unit_id"),
+)
+
+
+# ---------------------------------------------------------------------------
+# Many-to-many: a maintenance task can apply to multiple units (e.g.
+# "paint hallway" covering A2 + A3). `maintenance_tasks.property_unit_id`
+# stays as the legacy primary pointer, this junction is the source of
+# truth for multi-unit tasks. Backfilled from the legacy FK in 016.
+# ---------------------------------------------------------------------------
+maintenance_task_units = Table(
+    "maintenance_task_units",
+    Base.metadata,
+    Column(
+        "maintenance_task_id",
+        String(36),
+        ForeignKey("maintenance_tasks.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "property_unit_id",
+        String(36),
+        ForeignKey("property_units.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("created_at", DateTime(timezone=True), default=_utcnow, nullable=False),
+    Index("ix_maintenance_task_units_unit", "property_unit_id"),
+)
+
+
+# ---------------------------------------------------------------------------
+# Many-to-many: a contract can cover one or more parking spaces. Mirrors
+# `ugovor_units` — parking spaces have no legacy primary FK on UgovoriRow,
+# so this junction is the sole source of truth for contract <-> parking
+# linkage.
+# ---------------------------------------------------------------------------
+ugovor_parkings = Table(
+    "ugovor_parkings",
+    Base.metadata,
+    Column(
+        "ugovor_id",
+        String(36),
+        ForeignKey("ugovori.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "parking_id",
+        String(36),
+        ForeignKey("parking_spaces.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("created_at", DateTime(timezone=True), default=_utcnow, nullable=False),
+    Index("ix_ugovor_parkings_parking", "parking_id"),
+)
 
 
 # =========================================================================
@@ -74,6 +156,14 @@ class UserRow(Base):
     reset_token_expires: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # When the user last changed their own password. NULL = the password
+    # is the admin-issued temporary one and must be rotated on first login.
+    password_changed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Explicit force-rotate flag — set when an admin (re-)issues a temp
+    # password. Cleared by the user's password-change call.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
@@ -249,7 +339,16 @@ class NekretnineRow(Base):
         String(100), nullable=True
     )
     vrsta: Mapped[str] = mapped_column(String(50), default="ostalo")
+    # Legacy single area field, kept for back-compat. New entries should set
+    # `povrsina_objekta` (building footprint) and/or `povrsina_zemljista`
+    # (land area). Both are optional so existing rows don't need backfill.
     povrsina: Mapped[float] = mapped_column(Float, default=0.0)
+    povrsina_objekta: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
+    povrsina_zemljista: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
     godina_izgradnje: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True
     )
@@ -371,6 +470,13 @@ class PropertyUnitRow(Base):
     ugovori: Mapped[List["UgovoriRow"]] = relationship(
         back_populates="property_unit", lazy="noload"
     )
+    # M2M side: contracts that cover this unit through the junction table.
+    # Disjoint from `ugovori` above which only sees legacy primary-unit FKs.
+    ugovori_secondary: Mapped[List["UgovoriRow"]] = relationship(
+        secondary=ugovor_units,
+        back_populates="units",
+        lazy="noload",
+    )
     racuni: Mapped[List["RacuniRow"]] = relationship(
         back_populates="property_unit", lazy="noload"
     )
@@ -477,6 +583,19 @@ class ZakupniciRow(Base):
         back_populates="zakupnik", lazy="noload"
     )
 
+    # Link to a tenant-role user account so the user can self-serve via
+    # /self/* endpoints. NULL until an admin invites a user for this
+    # zakupnik. UNIQUE so one tenant user = exactly one zakupnik.
+    user_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    )
+    user: Mapped[Optional["UserRow"]] = relationship(
+        foreign_keys=[user_id], lazy="noload"
+    )
+
 
 class UgovoriRow(Base):
     """Contracts (ugovori)."""
@@ -577,6 +696,13 @@ class UgovoriRow(Base):
         String(36), ForeignKey("ugovori.id"), nullable=True
     )
 
+    # Last time the "your contract is expiring" email was sent for this
+    # row. Notification service skips contracts notified in the last 7 days
+    # so admins don't get the same expiry warning every 24h.
+    last_expiry_notified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -595,6 +721,20 @@ class UgovoriRow(Base):
     )
     property_unit: Mapped[Optional["PropertyUnitRow"]] = relationship(
         back_populates="ugovori", lazy="joined"
+    )
+    # All units covered by this contract. Source of truth for multi-unit
+    # contracts; for legacy single-unit rows the migration backfills one
+    # entry here matching `property_unit_id` so callers can use either.
+    units: Mapped[List["PropertyUnitRow"]] = relationship(
+        secondary=ugovor_units,
+        back_populates="ugovori_secondary",
+        lazy="selectin",
+    )
+    # All parking spaces covered by this contract.
+    parkings: Mapped[List["ParkingSpaceRow"]] = relationship(
+        secondary=ugovor_parkings,
+        back_populates="ugovori",
+        lazy="selectin",
     )
     parent_contract: Mapped[Optional["UgovoriRow"]] = relationship(
         remote_side="UgovoriRow.id", lazy="noload"
@@ -691,6 +831,14 @@ class MaintenanceTaskRow(Base):
 
     __table_args__ = (
         Index("ix_maintenance_tenant_status", "tenant_id", "status"),
+        # Prevent the scheduler from creating two recurring children for the
+        # same parent + due date if it ever fires twice in quick succession.
+        Index(
+            "uq_maintenance_recurrence_slot",
+            "parent_task_id",
+            "rok",
+            unique=True,
+        ),
     )
 
     id: Mapped[str] = mapped_column(
@@ -775,6 +923,13 @@ class MaintenanceTaskRow(Base):
     property_unit: Mapped[Optional["PropertyUnitRow"]] = relationship(
         lazy="noload"
     )
+    # M:N — full set of units this task covers. Source of truth for
+    # multi-unit tasks; legacy primary FK `property_unit_id` stays as the
+    # "primary" pointer for reports/recurring children.
+    units: Mapped[List["PropertyUnitRow"]] = relationship(
+        secondary=maintenance_task_units,
+        lazy="selectin",
+    )
     ugovor: Mapped[Optional["UgovoriRow"]] = relationship(
         back_populates="maintenance_tasks", lazy="noload"
     )
@@ -832,9 +987,20 @@ class ActivityLogRow(Base):
 
 
 class ParkingSpaceRow(Base):
-    """Parking spaces linked to a property."""
+    """Parking spaces linked to a property.
+
+    Lifecycle mirrors PropertyUnitRow — `status` is propagated through
+    contracts via the `ugovor_parkings` junction. There is no direct
+    `zakupnik_id`: the lessee is derived through the active contract.
+    """
 
     __tablename__ = "parking_spaces"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "nekretnina_id", "internal_id", name="uq_parking_nekretnina_internal"
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=_new_uuid
@@ -845,11 +1011,13 @@ class ParkingSpaceRow(Base):
     nekretnina_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("nekretnine.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    zakupnik_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("zakupnici.id", ondelete="SET NULL"), nullable=True, index=True
-    )
     floor: Mapped[str] = mapped_column(String(20), nullable=False)
     internal_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    naziv: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="dostupno")
+    osnovna_zakupnina: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
     vehicle_plates: Mapped[Any] = mapped_column(sa.JSON, default=list)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
@@ -864,6 +1032,12 @@ class ParkingSpaceRow(Base):
     )
     nekretnina: Mapped["NekretnineRow"] = relationship(
         back_populates="parking_spaces", lazy="noload"
+    )
+    # All contracts that cover this parking space through the junction.
+    ugovori: Mapped[List["UgovoriRow"]] = relationship(
+        secondary=ugovor_parkings,
+        back_populates="parkings",
+        lazy="noload",
     )
 
 
@@ -1206,6 +1380,24 @@ class RacuniRow(Base):
     )
     total_paid: Mapped[float] = mapped_column(Float, default=0.0)
     payments: Mapped[Any] = mapped_column(sa.JSON, default=list)
+
+    # Last time the "račun je dospio" reminder was sent. Same idempotency
+    # window as `UgovoriRow.last_expiry_notified_at`.
+    last_overdue_notified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Bill splitting: a "master" bill (whole-building utility invoice from
+    # the supplier) is split into N "child" bills, one per tenant/unit.
+    # `is_master_bill` flags the source row; `master_bill_id` points from
+    # each child back to its source. A child cannot itself be split.
+    is_master_bill: Mapped[bool] = mapped_column(Boolean, default=False)
+    master_bill_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("racuni.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # Approval workflow
     approval_status: Mapped[Optional[str]] = mapped_column(
