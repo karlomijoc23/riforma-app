@@ -356,35 +356,61 @@ async def _build_context(
         prop_name = (
             nek_by_id[prop_id].naziv if prop_id in nek_by_id else "Nepovezano"
         )
+        rent_f = float(b["rent"] or 0)
+        area_f = float(b["area"] or 0)
+        eur_per_m2 = rent_f / area_f
         avg_per_property.append({
             "property_id": prop_id,
             "property_name": prop_name,
-            "rent": b["rent"],
-            "area_m2": b["area"],
-            "eur_per_m2": b["rent"] / b["area"],
+            "rent": rent_f,
+            "area_m2": area_f,
+            "eur_per_m2": eur_per_m2,
         })
     avg_per_property.sort(key=lambda r: -r["eur_per_m2"])
 
-    total_rent_for_m2 = sum(b["rent"] for b in per_property_rent_m2.values())
-    total_area_for_m2 = sum(b["area"] for b in per_property_rent_m2.values())
-    portfolio_avg_per_m2 = (
-        total_rent_for_m2 / total_area_for_m2 if total_area_for_m2 > 0 else 0
+    total_rent_for_m2 = float(
+        sum(b["rent"] for b in per_property_rent_m2.values())
     )
+    total_area_for_m2 = float(
+        sum(b["area"] for b in per_property_rent_m2.values())
+    )
+    portfolio_avg_per_m2 = (
+        total_rent_for_m2 / total_area_for_m2 if total_area_for_m2 > 0 else 0.0
+    )
+
+    # Pre-renderaj "vs portfelj" stupac za avg_per_property — izbjegni
+    # Jinja aritmetiku u templateu (otpornije na razlike u Pythonu /
+    # WeasyPrint Jinja verzijama).
+    for r in avg_per_property:
+        if portfolio_avg_per_m2 > 0:
+            diff = (r["eur_per_m2"] - portfolio_avg_per_m2) / portfolio_avg_per_m2 * 100
+            r["vs_portfolio_pct"] = diff
+            r["vs_portfolio_label"] = (
+                f"+{diff:.1f} %" if diff >= 0 else f"{diff:.1f} %"
+            )
+        else:
+            r["vs_portfolio_pct"] = None
+            r["vs_portfolio_label"] = "—"
 
     # Mapiraj €/m² i vs-portfelj % natrag na svaki ugovor u `enriched`,
     # kako bi tablica detalja mogla prikazati te brojeve umjesto CAM/Status.
     # Neaktivni ili ugovori bez mjerljive površine dobivaju None — frontend
     # render to prikaže kao "—".
     eur_per_m2_by_contract = {
-        r["contract_id"]: r["eur_per_m2"] for r in per_contract_rent_m2
+        r["contract_id"]: float(r["eur_per_m2"]) for r in per_contract_rent_m2
     }
     for d in enriched:
         e = eur_per_m2_by_contract.get(d["id"])
         d["eur_per_m2"] = e
         if e is not None and portfolio_avg_per_m2 > 0:
-            d["vs_portfolio_pct"] = (e - portfolio_avg_per_m2) / portfolio_avg_per_m2 * 100
+            diff = (e - portfolio_avg_per_m2) / portfolio_avg_per_m2 * 100
+            d["vs_portfolio_pct"] = diff
+            d["vs_portfolio_label"] = (
+                f"+{diff:.1f} %" if diff >= 0 else f"{diff:.1f} %"
+            )
         else:
             d["vs_portfolio_pct"] = None
+            d["vs_portfolio_label"] = "—"
 
     now = datetime.now(timezone.utc)
     return {

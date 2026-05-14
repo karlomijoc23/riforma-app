@@ -256,11 +256,37 @@ async def _build_context() -> Dict[str, Any]:
     avg_per_property.sort(key=lambda x: -x["eur_per_m2"])
 
     # Portfelj-prosjek (za usporedbu individualnih s ukupnim)
-    total_rent_for_m2 = sum(b["rent"] for b in per_property_rent.values())
-    total_area_for_m2 = sum(b["area"] for b in per_property_rent.values())
-    portfolio_avg_per_m2 = (
-        total_rent_for_m2 / total_area_for_m2 if total_area_for_m2 > 0 else 0
+    total_rent_for_m2 = float(
+        sum(b["rent"] for b in per_property_rent.values())
     )
+    total_area_for_m2 = float(
+        sum(b["area"] for b in per_property_rent.values())
+    )
+    portfolio_avg_per_m2 = (
+        total_rent_for_m2 / total_area_for_m2 if total_area_for_m2 > 0 else 0.0
+    )
+
+    # Pre-render vs portfelj labela i ROI labela u Pythonu — izbjegava
+    # Jinja `| format(...)` filter koji puca na Decimal vrijednostima na
+    # nekim WeasyPrint / Jinja2 verzijama.
+    for r in avg_per_property:
+        if portfolio_avg_per_m2 > 0:
+            diff = (r["eur_per_m2"] - portfolio_avg_per_m2) / portfolio_avg_per_m2 * 100
+            r["vs_portfolio_pct"] = diff
+            r["vs_portfolio_label"] = (
+                f"+{diff:.1f} %" if diff >= 0 else f"{diff:.1f} %"
+            )
+        else:
+            r["vs_portfolio_pct"] = None
+            r["vs_portfolio_label"] = "—"
+
+    # Pre-render ROI label per property
+    for p in enriched:
+        roi = p.get("roi_pct")
+        if roi is None:
+            p["roi_label"] = "—"
+        else:
+            p["roi_label"] = f"{float(roi):.1f} %"
 
     now = datetime.now(timezone.utc)
     return {

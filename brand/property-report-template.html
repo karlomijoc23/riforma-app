@@ -262,12 +262,11 @@
           <td class="num">{{ r.rent | currency }}</td>
           <td class="num fw-semibold">{{ r.eur_per_m2 | currency }}/m²</td>
           <td class="num">
-            {% if portfolio_avg_per_m2 %}
-              {% set diff_pct = ((r.eur_per_m2 - portfolio_avg_per_m2) / portfolio_avg_per_m2) * 100 %}
-              {% if diff_pct >= 0 %}
-                <span class="text-positive">+{{ "%.1f"|format(diff_pct) }} %</span>
+            {% if r.vs_portfolio_pct is not none %}
+              {% if r.vs_portfolio_pct >= 0 %}
+                <span class="text-positive">{{ r.vs_portfolio_label }}</span>
               {% else %}
-                <span class="text-negative">{{ "%.1f"|format(diff_pct) }} %</span>
+                <span class="text-negative">{{ r.vs_portfolio_label }}</span>
               {% endif %}
             {% else %}—{% endif %}
           </td>
@@ -313,7 +312,7 @@
             </div>
           </td>
           <td class="num fw-semibold">
-            {% if p.roi_pct is not none %}{{ "%.1f"|format(p.roi_pct) }} %{% else %}—{% endif %}
+            {{ p.roi_label }}
           </td>
           <td class="num">{{ p.active_contract_count }}</td>
         </tr>
