@@ -294,9 +294,12 @@ async def _build_context(
     # Decimal vrijednostima i `| round` filter.
     rev_max = revenue_list[0]["amount"] if revenue_list else 0
     for r in revenue_list:
-        r["bar_width"] = (
-            int(round(r["amount"] / rev_max * 100)) if rev_max > 0 else 0
-        )
+        width = int(round(r["amount"] / rev_max * 100)) if rev_max > 0 else 0
+        r["bar_width"] = width
+        # Pre-rendered inline style — držimo Jinja izraze izvan `style="..."`
+        # atributa kako VSCode CSS linter ne bi prijavljivao lažne greške
+        # (ne razumije `{{ }}` unutar CSS-a).
+        r["bar_style"] = f"width: {width}%;"
 
     tenants_sorted = sorted(
         ({**b, "rent": float(b.get("rent") or 0)} for b in tenant_buckets.values()),
@@ -306,9 +309,9 @@ async def _build_context(
     tenants_overflow = max(0, len(tenants_sorted) - SUMMARY_LIMIT)
     ten_max = top_tenants[0]["rent"] if top_tenants else 0
     for r in top_tenants:
-        r["bar_width"] = (
-            int(round(r["rent"] / ten_max * 100)) if ten_max > 0 else 0
-        )
+        width = int(round(r["rent"] / ten_max * 100)) if ten_max > 0 else 0
+        r["bar_width"] = width
+        r["bar_style"] = f"width: {width}%;"
 
     totals = {
         "count": total,

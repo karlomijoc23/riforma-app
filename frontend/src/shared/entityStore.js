@@ -44,6 +44,12 @@ export const EntityStoreProvider = ({ children }) => {
   const inflightRef = useRef({});
   // AbortController to cancel in-flight requests on tenant switch
   const abortRef = useRef(new AbortController());
+  // Sjećanje prethodnog tenanta — preskoči reset/abort pri prvom mountu
+  // (inače aborto prazan controller, ali stigne ABORTED signal do
+  // `getUgovori({ signal })` koji UgovoriPage upravo pokreće, pa axios
+  // vrati `CanceledError` i tablica ostane prazna do prvog ručnog
+  // navigacijskog click-a).
+  const prevTenantRef = useRef(tenantId);
 
   useEffect(() => {
     const unsubscribe = subscribeToTenantChanges((nextTenantId) => {
@@ -54,6 +60,13 @@ export const EntityStoreProvider = ({ children }) => {
 
   // Reset on tenant change — abort in-flight requests from the old tenant
   useEffect(() => {
+    // Prvi mount: prevTenantRef === tenantId, ne radi reset.
+    // Inače: tenant je zaista promijenjen, abort + clear cache.
+    if (prevTenantRef.current === tenantId) {
+      return;
+    }
+    prevTenantRef.current = tenantId;
+
     abortRef.current.abort();
     abortRef.current = new AbortController();
     loadedRef.current = {

@@ -347,7 +347,7 @@
             <div class="rank-list__body">
               <div class="rank-list__name">{{ row.name }}</div>
               <div class="rank-list__bar">
-                <span style="width: {{ row.bar_width }}%;"></span>
+                <span style="{{ row.bar_style }}"></span>
               </div>
             </div>
             <div class="rank-list__value">{{ row.amount | currency }}</div>
@@ -373,7 +373,7 @@
               <div class="rank-list__name">{{ row.name }}</div>
               <div class="rank-list__hint">{{ row.count }} ugovor{% if row.count != 1 %}a{% endif %}</div>
               <div class="rank-list__bar">
-                <span style="width: {{ row.bar_width }}%;"></span>
+                <span style="{{ row.bar_style }}"></span>
               </div>
             </div>
             <div class="rank-list__value">{{ row.rent | currency }}</div>
