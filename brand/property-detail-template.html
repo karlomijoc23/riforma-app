@@ -60,6 +60,9 @@
       .pill-danger   { background: var(--status-danger-bg);   color: var(--status-danger-fg);   border-color: var(--status-danger-bd); }
       .pill-neutral  { background: var(--color-subtle);       color: var(--color-ink-soft);    border-color: var(--color-border); }
 
+      .text-positive { color: #0f6a44; font-weight: 600; }
+      .text-negative { color: #b45309; font-weight: 600; }
+
       .notes-box {
         background: var(--color-subtle);
         border-left: 3px solid var(--color-accent);
@@ -206,7 +209,14 @@
     {% endif %}
 
     {% if contracts and contracts|length > 0 %}
-    <h2 class="section-title">Aktivni ugovori ({{ contracts|length }})</h2>
+    <h2 class="section-title">
+      Aktivni ugovori ({{ contracts|length }})
+      {% if property_avg_per_m2 and property_avg_per_m2 > 0 %}
+      <span style="font-weight:500; letter-spacing:0; text-transform:none; color:var(--color-muted); font-size:9pt;">
+        · prosjek nekretnine {{ property_avg_per_m2 | currency }}/m²
+      </span>
+      {% endif %}
+    </h2>
     <table class="data-table">
       <thead>
         <tr>
@@ -215,6 +225,8 @@
           <th>Početak</th>
           <th>Završetak</th>
           <th class="num">Mj. zakupnina</th>
+          <th class="num">€ / m²</th>
+          <th class="num">vs nekretnina</th>
           <th>Status</th>
         </tr>
       </thead>
@@ -226,6 +238,16 @@
           <td>{{ c.datum_pocetka | fdate }}</td>
           <td>{{ c.datum_zavrsetka | fdate }}</td>
           <td class="num fw-semibold">{{ c.osnovna_zakupnina | currency }}</td>
+          <td class="num">{{ c.eur_per_m2_label }}</td>
+          <td class="num">
+            {% if c.vs_property_pct is not none %}
+              {% if c.vs_property_pct >= 0 %}
+                <span class="text-positive">{{ c.vs_property_label }}</span>
+              {% else %}
+                <span class="text-negative">{{ c.vs_property_label }}</span>
+              {% endif %}
+            {% else %}—{% endif %}
+          </td>
           <td><span class="pill pill-{{ c.status_pill_class }}">{{ c.status_label }}</span></td>
         </tr>
         {% endfor %}

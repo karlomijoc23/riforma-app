@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from app.db.repositories.instance import (
     nekretnine,
@@ -18,6 +19,8 @@ from app.db.repositories.instance import (
     ugovori,
     zakupnici,
 )
+from app.db.session import get_async_session_factory
+from app.models.tables import ugovor_units
 from app.services.pdf_common import html_to_pdf, make_jinja_env
 
 _TYPE_LABELS = {
@@ -129,6 +132,20 @@ async def _build_context(property_id: str) -> Dict[str, Any]:
         d["status_pill_class"] = _unit_status_pill(d.get("status"))
         parkings.append(d)
 
+    # M:N junction — koje jedinice pokriva svaki ugovor (junction first,
+    # fall back na legacy property_unit_id FK)
+    factory = get_async_session_factory()
+    async with factory() as session:
+        junction_rows = (
+            await session.execute(
+                select(ugovor_units.c.ugovor_id, ugovor_units.c.property_unit_id)
+            )
+        ).all()
+    ugovor_unit_map: Dict[str, List[str]] = {}
+    for ug_id, unit_id in junction_rows:
+        ugovor_unit_map.setdefault(ug_id, []).append(unit_id)
+    units_by_id = {u.id: u for u in units_rows}
+
     # Active contracts only — same set the on-screen detail page highlights.
     active_contracts_raw = [
         c for c in contract_rows if c.status in _ACTIVE_CONTRACT_STATUSES
@@ -143,10 +160,55 @@ async def _build_context(property_id: str) -> Dict[str, Any]:
         )
         d["status_label"] = _contract_status_label(d.get("status"))
         d["status_pill_class"] = _contract_status_pill(d.get("status"))
+
+        # €/m² po ugovoru = rent ÷ ukupna_površina_jedinica koje pokriva
+        rent_val = float(c.osnovna_zakupnina or 0)
+        unit_ids = ugovor_unit_map.get(c.id) or (
+            [c.property_unit_id] if c.property_unit_id else []
+        )
+        area = sum(
+            float(units_by_id[uid].povrsina_m2 or 0)
+            for uid in unit_ids
+            if uid in units_by_id
+        )
+        if rent_val > 0 and area > 0:
+            d["eur_per_m2"] = rent_val / area
+            d["area_m2_total"] = area
+        else:
+            d["eur_per_m2"] = None
+            d["area_m2_total"] = area
+
         contracts.append(d)
-        monthly_income += float(c.osnovna_zakupnina or 0)
+        monthly_income += rent_val
 
     contracts.sort(key=lambda c: c.get("datum_pocetka") or "", reverse=True)
+
+    # Property avg €/m² — prosjek aktivnih ugovora na ovoj nekretnini
+    measurable = [c for c in contracts if c.get("eur_per_m2") is not None]
+    total_rent_m2 = float(
+        sum(float(c.get("osnovna_zakupnina") or 0) for c in measurable)
+    )
+    total_area_m2 = float(sum(c["area_m2_total"] for c in measurable))
+    property_avg_per_m2 = (
+        total_rent_m2 / total_area_m2 if total_area_m2 > 0 else 0.0
+    )
+
+    # Pre-render vs nekretnina label za svaki ugovor — Python f-string,
+    # ne Jinja format (više otporan na Decimal iz asyncmy / verzijske
+    # razlike).
+    for d in contracts:
+        e = d.get("eur_per_m2")
+        if e is not None and property_avg_per_m2 > 0:
+            diff = (e - property_avg_per_m2) / property_avg_per_m2 * 100
+            d["vs_property_pct"] = diff
+            d["vs_property_label"] = (
+                f"+{diff:.1f} %" if diff >= 0 else f"{diff:.1f} %"
+            )
+            d["eur_per_m2_label"] = f"{e:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " €/m²"
+        else:
+            d["vs_property_pct"] = None
+            d["vs_property_label"] = "—"
+            d["eur_per_m2_label"] = "—"
 
     annual_income = monthly_income * 12
     market_value = float(property_dict.get("trzisna_vrijednost") or 0)
@@ -178,6 +240,7 @@ async def _build_context(property_id: str) -> Dict[str, Any]:
         "parkings": parkings,
         "contracts": contracts,
         "totals": totals,
+        "property_avg_per_m2": property_avg_per_m2,
         "generated_at": now.strftime("%d.%m.%Y."),
         "generated_at_long": now.strftime("%d.%m.%Y. %H:%M"),
     }
