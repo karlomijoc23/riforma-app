@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { api } from "../../shared/api";
 import {
   downloadPdfFromResponse,
@@ -8,13 +8,23 @@ import { formatDate, formatCurrency } from "../../shared/formatters";
 import {
   Loader2,
   Printer,
-  Download,
   AlertTriangle,
   ArrowLeft,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { toast } from "../../components/ui/sonner";
+import {
+  ReportHeader,
+  SectionTitle,
+  KpiGrid,
+  KpiCard,
+  DataTable,
+  DataTableHead,
+  RankList,
+  DownloadPdfButton,
+  REPORT_COLORS,
+} from "../../shared/reportUI";
 
 const STATUS_LABELS = {
   novi: "Novi",
@@ -24,29 +34,51 @@ const STATUS_LABELS = {
   arhivirano: "Arhivirano",
 };
 
-const STATUS_DOT = {
+const PRIORITY_LABELS = {
+  kriticno: "Kritični",
+  visoki: "Visoki",
+  visoko: "Visoki",
+  srednji: "Srednji",
+  srednje: "Srednji",
+  niski: "Niski",
+  nisko: "Niski",
+};
+
+const PRIORITY_ORDER = {
+  kriticno: 0,
+  visoki: 1,
+  visoko: 1,
+  srednji: 2,
+  srednje: 2,
+  niski: 3,
+  nisko: 3,
+};
+
+const STATUS_TONE = {
+  novi: "info",
+  ceka_dobavljaca: "warn",
+  u_tijeku: "info",
+  zavrseno: "positive",
+  arhivirano: "neutral",
+};
+
+const PRIORITY_COLOR = {
+  kriticno: "#dc2626",
+  visoki: "#ea580c",
+  visoko: "#ea580c",
+  srednji: "#d97706",
+  srednje: "#d97706",
+  niski: "#16a34a",
+  nisko: "#16a34a",
+};
+
+const STATUS_COLOR = {
   novi: "#0ea5e9",
   ceka_dobavljaca: "#a855f7",
   u_tijeku: "#3b82f6",
   zavrseno: "#10b981",
   arhivirano: "#94a3b8",
 };
-
-const PRIORITY_LABELS = {
-  kriticno: "Kritični",
-  visoko: "Visoki",
-  srednje: "Srednji",
-  nisko: "Niski",
-};
-
-const PRIORITY_DOT = {
-  kriticno: "#dc2626",
-  visoko: "#ea580c",
-  srednje: "#d97706",
-  nisko: "#16a34a",
-};
-
-const PRIORITY_ORDER = { kriticno: 0, visoko: 1, srednje: 2, nisko: 3 };
 
 const MaintenanceReport = () => {
   const navigate = useNavigate();
@@ -68,19 +100,18 @@ const MaintenanceReport = () => {
         );
         const usersMap = new Map(usersRes.data.map((u) => [String(u.id), u]));
 
-        const enrichedTasks = tasksRes.data
+        const enriched = tasksRes.data
           .map((t) => {
             const property = propertiesMap.get(String(t.nekretnina_id));
             const assigneeUser = usersMap.get(String(t.dodijeljeno_user_id));
-            const assigneeName =
-              t.dodijeljeno ||
-              (assigneeUser
-                ? assigneeUser.full_name || assigneeUser.email || "—"
-                : "—");
             return {
               ...t,
-              nekretnina_naziv: property ? property.naziv : "—",
-              dodijeljeno_naziv: assigneeName,
+              nekretnina_naziv: property?.naziv || "—",
+              dodijeljeno_naziv:
+                t.dodijeljeno ||
+                (assigneeUser
+                  ? assigneeUser.full_name || assigneeUser.email || "—"
+                  : "—"),
             };
           })
           .sort((a, b) => {
@@ -90,7 +121,7 @@ const MaintenanceReport = () => {
             return (a.rok || "").localeCompare(b.rok || "");
           });
 
-        setTasks(enrichedTasks);
+        setTasks(enriched);
       } catch (err) {
         console.error("Failed to fetch maintenance report data", err);
         setError("Greška pri učitavanju podataka izvještaja");
@@ -109,7 +140,6 @@ const MaintenanceReport = () => {
       downloadPdfFromResponse(res, "riforma-izvjestaj-odrzavanja.pdf");
       toast.success("PDF preuzet.");
     } catch (err) {
-      console.error("PDF generation failed", err);
       const detail = await extractBlobErrorDetail(err);
       toast.error(detail);
     } finally {
@@ -117,59 +147,95 @@ const MaintenanceReport = () => {
     }
   }, []);
 
-  // --- Metrics ---
-  const totalTasks = tasks.length;
-  const openTasks = tasks.filter(
-    (t) => !["zavrseno", "arhivirano"].includes(t.status),
-  );
-  const overdueTasks = tasks.filter((t) => {
-    if (["zavrseno", "arhivirano"].includes(t.status)) return false;
-    if (!t.rok) return false;
-    return new Date(t.rok) < new Date();
-  });
-  const completedTasks = tasks.filter((t) => t.status === "zavrseno");
-  const criticalTasks = tasks.filter(
-    (t) =>
-      t.prioritet === "kriticno" &&
-      !["zavrseno", "arhivirano"].includes(t.status),
-  );
+  const metrics = useMemo(() => {
+    const total = tasks.length;
+    const isClosed = (t) => ["zavrseno", "arhivirano"].includes(t.status);
+    const today = new Date();
+    const open = tasks.filter((t) => !isClosed(t));
+    const overdue = tasks.filter(
+      (t) => !isClosed(t) && t.rok && new Date(t.rok) < today,
+    );
+    const completed = tasks.filter((t) => t.status === "zavrseno");
+    const critical = tasks.filter(
+      (t) => t.prioritet === "kriticno" && !isClosed(t),
+    );
+    const materialCost = tasks.reduce(
+      (s, t) => s + (Number(t.trosak_materijal) || 0),
+      0,
+    );
+    const laborCost = tasks.reduce(
+      (s, t) => s + (Number(t.trosak_rad) || 0),
+      0,
+    );
+    const totalCost = materialCost + laborCost;
 
-  const totalMaterialCost = tasks.reduce(
-    (sum, t) => sum + (Number(t.trosak_materijal) || 0),
-    0,
-  );
-  const totalLaborCost = tasks.reduce(
-    (sum, t) => sum + (Number(t.trosak_rad) || 0),
-    0,
-  );
-  const totalCost = totalMaterialCost + totalLaborCost;
+    const statusMap = new Map();
+    tasks.forEach((t) => {
+      const key = t.status || "nepoznato";
+      statusMap.set(key, (statusMap.get(key) || 0) + 1);
+    });
+    const statusSummary = [...statusMap.entries()].map(([key, count]) => ({
+      key,
+      label: STATUS_LABELS[key] || key,
+      count,
+      pct: total ? Math.round((count / total) * 100) : 0,
+      color: STATUS_COLOR[key] || "#94a3b8",
+    }));
 
-  const statusSummary = {};
-  tasks.forEach((t) => {
-    statusSummary[t.status || "nepoznato"] =
-      (statusSummary[t.status || "nepoznato"] || 0) + 1;
-  });
+    const priorityMap = new Map();
+    tasks.forEach((t) => {
+      const key = t.prioritet || "nepoznato";
+      priorityMap.set(key, (priorityMap.get(key) || 0) + 1);
+    });
+    const prioritySummary = [...priorityMap.entries()]
+      .map(([key, count]) => ({
+        key,
+        label: PRIORITY_LABELS[key] || key,
+        count,
+        pct: total ? Math.round((count / total) * 100) : 0,
+        color: PRIORITY_COLOR[key] || "#94a3b8",
+        order: PRIORITY_ORDER[key] ?? 99,
+      }))
+      .sort((a, b) => a.order - b.order);
 
-  const prioritySummary = {};
-  tasks.forEach((t) => {
-    prioritySummary[t.prioritet || "nepoznato"] =
-      (prioritySummary[t.prioritet || "nepoznato"] || 0) + 1;
-  });
+    const byPropCount = new Map();
+    const byPropCost = new Map();
+    tasks.forEach((t) => {
+      const key = t.nekretnina_naziv || "Nepovezano";
+      byPropCount.set(key, (byPropCount.get(key) || 0) + 1);
+      byPropCost.set(
+        key,
+        (byPropCost.get(key) || 0) +
+          (Number(t.trosak_materijal) || 0) +
+          (Number(t.trosak_rad) || 0),
+      );
+    });
+    const countSorted = [...byPropCount.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+    const costSorted = [...byPropCost.entries()]
+      .map(([name, cost]) => ({ name, cost }))
+      .sort((a, b) => b.cost - a.cost);
 
-  const tasksByProperty = {};
-  tasks.forEach((t) => {
-    const key = t.nekretnina_naziv || "Nepovezano";
-    tasksByProperty[key] = (tasksByProperty[key] || 0) + 1;
-  });
-
-  const costByProperty = {};
-  tasks.forEach((t) => {
-    const key = t.nekretnina_naziv || "Nepovezano";
-    costByProperty[key] =
-      (costByProperty[key] || 0) +
-      (Number(t.trosak_materijal) || 0) +
-      (Number(t.trosak_rad) || 0);
-  });
+    return {
+      total,
+      open,
+      overdue,
+      completed,
+      critical,
+      materialCost,
+      laborCost,
+      totalCost,
+      statusSummary,
+      prioritySummary,
+      countSorted,
+      countMax: countSorted[0]?.count || 1,
+      countOverflow: Math.max(0, countSorted.length - 5),
+      costSorted,
+      costMax: costSorted[0]?.cost || 1,
+      costOverflow: Math.max(0, costSorted.length - 5),
+    };
+  }, [tasks]);
 
   if (loading) {
     return (
@@ -178,7 +244,6 @@ const MaintenanceReport = () => {
       </div>
     );
   }
-
   if (error) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4">
@@ -197,9 +262,30 @@ const MaintenanceReport = () => {
     year: "numeric",
   });
 
+  const DistRow = ({ row }) => (
+    <div className="flex items-center gap-3 py-1.5 text-sm">
+      <span
+        className="w-2.5 h-2.5 rounded-full shrink-0"
+        style={{ background: row.color }}
+      />
+      <span className="w-32 text-foreground">{row.label}</span>
+      <div className="flex-1 h-2 bg-[#0F5E4D]/10 rounded-sm overflow-hidden">
+        <div
+          className="h-full"
+          style={{ width: `${row.pct}%`, background: row.color }}
+        />
+      </div>
+      <span className="w-8 text-right font-semibold tabular-nums">
+        {row.count}
+      </span>
+      <span className="w-12 text-right text-muted-foreground tabular-nums text-xs">
+        {row.pct} %
+      </span>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Toolbar */}
       <div className="sticky top-0 z-10 bg-white border-b shadow-sm px-6 py-3 flex items-center justify-between no-print">
         <div className="flex items-center gap-3">
           <Button
@@ -212,427 +298,226 @@ const MaintenanceReport = () => {
           <h1 className="text-lg font-semibold">Izvještaj održavanja</h1>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDownloadPdf}
-            disabled={downloading}
-          >
-            {downloading ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="mr-1 h-4 w-4" />
-            )}
-            PDF
-          </Button>
-          <Button size="sm" onClick={() => window.print()}>
+          <DownloadPdfButton onClick={handleDownloadPdf} downloading={downloading} />
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="mr-1 h-4 w-4" /> Ispis
           </Button>
         </div>
       </div>
 
-      {/* ═══════════════════ REPORT CONTENT ═══════════════════ */}
-      <div
-        className="max-w-[1100px] mx-auto bg-white"
-        style={{
-          fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
-        }}
-      >
-        {/* Header band */}
-        <div className="bg-slate-800 text-white px-10 py-6">
-          <div className="flex items-end justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-300 mb-1">
-                Riforma
-              </p>
-              <h1 className="text-[22px] font-bold tracking-tight">
-                Izvještaj održavanja
-              </h1>
+      <div className="max-w-[1200px] mx-auto p-6 space-y-2">
+        <ReportHeader
+          eyebrow="Izvještaj održavanja"
+          title="Zadaci održavanja"
+          subtitle="Status, prioriteti i troškovi održavanja kroz portfelj."
+          metaLabel="Datum izvještaja"
+          metaValue={reportDate}
+        />
+
+        <SectionTitle>Ključni pokazatelji</SectionTitle>
+        <KpiGrid>
+          <KpiCard
+            label="Ukupno zadataka"
+            value={metrics.total}
+            sub={`Otvorenih ${metrics.open.length} · Završenih ${metrics.completed.length}`}
+          />
+          <KpiCard
+            variant="info"
+            label="Kritičnih"
+            value={metrics.critical.length}
+            sub="Prioritet visoki"
+          />
+          <KpiCard
+            label="Prekoračen rok"
+            value={metrics.overdue.length}
+            sub={metrics.overdue.length > 0 ? "Hitno za rješavanje" : "Sve u roku"}
+          />
+          <KpiCard
+            variant="accent"
+            label="Ukupni troškovi"
+            value={formatCurrency(metrics.totalCost)}
+            sub={`Materijal ${formatCurrency(metrics.materialCost)} · Rad ${formatCurrency(metrics.laborCost)}`}
+          />
+        </KpiGrid>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-2">
+          <div>
+            <SectionTitle>Raspodjela po statusu</SectionTitle>
+            <div className="rounded-md border border-[#0F5E4D]/15 bg-white p-3">
+              {metrics.statusSummary.map((row) => (
+                <DistRow key={row.key} row={row} />
+              ))}
             </div>
-            <div className="text-right text-sm text-slate-300">
-              <p>Datum izvještaja</p>
-              <p className="text-white font-semibold">{reportDate}</p>
+          </div>
+          <div>
+            <SectionTitle>Raspodjela po prioritetu</SectionTitle>
+            <div className="rounded-md border border-[#0F5E4D]/15 bg-white p-3">
+              {metrics.prioritySummary.map((row) => (
+                <DistRow key={row.key} row={row} />
+              ))}
             </div>
           </div>
         </div>
 
-        <div className="px-10 py-8">
-          {/* KPI row */}
-          <div className="grid grid-cols-6 gap-3 mb-8">
-            {[
-              {
-                label: "Ukupno zadataka",
-                value: totalTasks,
-                color: "text-slate-900",
-              },
-              {
-                label: "Otvorenih",
-                value: openTasks.length,
-                color: "text-blue-700",
-              },
-              {
-                label: "Kritičnih",
-                value: criticalTasks.length,
-                color: "text-red-700",
-              },
-              {
-                label: "Prekoračen rok",
-                value: overdueTasks.length,
-                color: "text-red-700",
-              },
-              {
-                label: "Završenih",
-                value: completedTasks.length,
-                color: "text-emerald-700",
-              },
-              {
-                label: "Ukupni troškovi",
-                value: formatCurrency(totalCost),
-                color: "text-slate-900",
-              },
-            ].map((kpi, i) => (
-              <div key={i} className="border border-slate-200 rounded p-3">
-                <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wide">
-                  {kpi.label}
-                </p>
-                <p className={`text-lg font-bold mt-0.5 ${kpi.color}`}>
-                  {kpi.value}
-                </p>
-              </div>
-            ))}
-          </div>
-
-          {/* Cost breakdown */}
-          <div className="grid grid-cols-3 gap-4 mb-8">
-            <div className="bg-slate-50 border border-slate-100 rounded p-4">
-              <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                Troškovi materijala
-              </p>
-              <p className="text-xl font-bold mt-1">
-                {formatCurrency(totalMaterialCost)}
-              </p>
-              <p className="text-[10px] text-slate-400 mt-0.5">
-                {totalCost > 0
-                  ? `${Math.round((totalMaterialCost / totalCost) * 100)}% ukupnih troškova`
-                  : "—"}
-              </p>
-            </div>
-            <div className="bg-slate-50 border border-slate-100 rounded p-4">
-              <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                Troškovi rada
-              </p>
-              <p className="text-xl font-bold mt-1">
-                {formatCurrency(totalLaborCost)}
-              </p>
-              <p className="text-[10px] text-slate-400 mt-0.5">
-                {totalCost > 0
-                  ? `${Math.round((totalLaborCost / totalCost) * 100)}% ukupnih troškova`
-                  : "—"}
-              </p>
-            </div>
-            <div className="bg-slate-800 text-white rounded p-4">
-              <p className="text-[10px] text-slate-300 uppercase font-semibold">
-                Ukupni troškovi
-              </p>
-              <p className="text-xl font-bold mt-1">
-                {formatCurrency(totalCost)}
-              </p>
-              <p className="text-[10px] text-slate-400 mt-0.5">
-                Materijal + rad
-              </p>
-            </div>
-          </div>
-
-          {/* Two-column: Status + Priority */}
-          <div className="grid grid-cols-2 gap-8 mb-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-2">
+          {metrics.countSorted.length > 0 && (
             <div>
-              <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-                Raspodjela po statusu
-              </h3>
-              <div className="space-y-2">
-                {Object.entries(statusSummary).map(([status, count]) => {
-                  const pct =
-                    totalTasks > 0 ? Math.round((count / totalTasks) * 100) : 0;
-                  return (
-                    <div
-                      key={status}
-                      className="flex items-center gap-2 text-xs"
-                    >
-                      <span
-                        className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
-                        style={{
-                          backgroundColor: STATUS_DOT[status] || "#94a3b8",
-                        }}
-                      />
-                      <span className="w-28">
-                        {STATUS_LABELS[status] || status}
-                      </span>
-                      <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${pct}%`,
-                            backgroundColor: STATUS_DOT[status] || "#94a3b8",
-                          }}
-                        />
-                      </div>
-                      <span className="font-semibold w-8 text-right">
-                        {count}
-                      </span>
-                      <span className="text-slate-400 w-10 text-right">
-                        {pct}%
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            <div>
-              <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-                Raspodjela po prioritetu
-              </h3>
-              <div className="space-y-2">
-                {Object.entries(prioritySummary)
-                  .sort(
-                    ([a], [b]) =>
-                      (PRIORITY_ORDER[a] ?? 99) - (PRIORITY_ORDER[b] ?? 99),
-                  )
-                  .map(([priority, count]) => {
-                    const pct =
-                      totalTasks > 0
-                        ? Math.round((count / totalTasks) * 100)
-                        : 0;
-                    return (
-                      <div
-                        key={priority}
-                        className="flex items-center gap-2 text-xs"
-                      >
-                        <span
-                          className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
-                          style={{
-                            backgroundColor:
-                              PRIORITY_DOT[priority] || "#94a3b8",
-                          }}
-                        />
-                        <span className="w-28">
-                          {PRIORITY_LABELS[priority] || priority}
-                        </span>
-                        <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${pct}%`,
-                              backgroundColor:
-                                PRIORITY_DOT[priority] || "#94a3b8",
-                            }}
-                          />
-                        </div>
-                        <span className="font-semibold w-8 text-right">
-                          {count}
-                        </span>
-                        <span className="text-slate-400 w-10 text-right">
-                          {pct}%
-                        </span>
-                      </div>
-                    );
-                  })}
-              </div>
-            </div>
-          </div>
-
-          {/* Tasks & Costs by property */}
-          <div className="grid grid-cols-2 gap-8 mb-8">
-            <div>
-              <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-                Zadaci po nekretnini
-              </h3>
-              <div className="space-y-1.5">
-                {Object.entries(tasksByProperty)
-                  .sort(([, a], [, b]) => b - a)
-                  .map(([name, count]) => (
-                    <div
-                      key={name}
-                      className="flex items-center justify-between text-xs"
-                    >
-                      <span className="truncate flex-1 min-w-0">{name}</span>
-                      <span className="font-semibold shrink-0 ml-2">
-                        {count}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            </div>
-            <div>
-              <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-                Troškovi po nekretnini
-              </h3>
-              <div className="space-y-1.5">
-                {Object.entries(costByProperty)
-                  .sort(([, a], [, b]) => b - a)
-                  .map(([name, cost]) => (
-                    <div
-                      key={name}
-                      className="flex items-center justify-between text-xs"
-                    >
-                      <span className="truncate flex-1 min-w-0">{name}</span>
-                      <span className="font-semibold shrink-0 ml-2">
-                        {formatCurrency(cost)}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Overdue warning */}
-          {overdueTasks.length > 0 && (
-            <div className="border-l-4 border-red-400 bg-red-50 rounded-r p-4 mb-8">
-              <h3 className="text-xs font-bold text-red-800 flex items-center gap-1.5 mb-2">
-                <AlertTriangle className="h-3.5 w-3.5" />
-                Zadaci s prekoračenim rokom ({overdueTasks.length})
-              </h3>
-              <div className="space-y-1">
-                {overdueTasks.slice(0, 5).map((t) => (
-                  <p key={t.id} className="text-[11px] text-red-900">
-                    <span className="font-semibold">{t.naziv}</span> —{" "}
-                    {t.nekretnina_naziv} — rok: {formatDate(t.rok)}
-                  </p>
-                ))}
-                {overdueTasks.length > 5 && (
-                  <p className="text-[11px] text-red-600 italic">
-                    ...i još {overdueTasks.length - 5} zadataka
-                  </p>
-                )}
-              </div>
+              <SectionTitle>Top 5 zadataka po nekretnini</SectionTitle>
+              <RankList
+                items={metrics.countSorted.slice(0, 5).map((r) => ({
+                  name: r.name,
+                  value: r.count,
+                  barWidth: Math.round((r.count / metrics.countMax) * 100),
+                }))}
+                valueFormatter={(n) => `${n}`}
+                overflow={metrics.countOverflow}
+              />
             </div>
           )}
+          {metrics.costSorted.length > 0 && (
+            <div>
+              <SectionTitle>Top 5 troškova po nekretnini</SectionTitle>
+              <RankList
+                items={metrics.costSorted.slice(0, 5).map((r) => ({
+                  name: r.name,
+                  value: r.cost,
+                  barWidth: Math.round((r.cost / metrics.costMax) * 100),
+                }))}
+                valueFormatter={formatCurrency}
+                overflow={metrics.costOverflow}
+              />
+            </div>
+          )}
+        </div>
 
-          {/* Main table */}
-          <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2 border-b border-slate-200 pb-1">
-            Detaljan pregled zadataka
-          </h3>
-          <table className="w-full border-collapse text-[11px]">
-            <thead>
-              <tr className="bg-slate-800 text-white">
-                <th className="text-left py-2 px-2 font-semibold">Naziv</th>
-                <th className="text-left py-2 px-2 font-semibold">
-                  Nekretnina
-                </th>
-                <th className="text-center py-2 px-2 font-semibold">
-                  Prioritet
-                </th>
-                <th className="text-center py-2 px-2 font-semibold">Status</th>
-                <th className="text-left py-2 px-2 font-semibold">Rok</th>
-                <th className="text-right py-2 px-2 font-semibold">
-                  Materijal
-                </th>
-                <th className="text-right py-2 px-2 font-semibold">Rad</th>
-                <th className="text-left py-2 px-2 font-semibold">
-                  Dodijeljeno
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.map((t, i) => {
-                const dueDate = t.rok ? new Date(t.rok) : null;
-                const isOverdue =
-                  dueDate &&
-                  !Number.isNaN(dueDate.getTime()) &&
-                  dueDate < new Date() &&
-                  !["zavrseno", "arhivirano"].includes(t.status);
-                return (
-                  <tr
-                    key={t.id}
-                    className={`border-b border-slate-100 ${i % 2 === 0 ? "bg-white" : "bg-slate-50/60"}`}
-                    style={{ pageBreakInside: "avoid" }}
+        {metrics.overdue.length > 0 && (
+          <>
+            <div
+              className="mt-6 rounded-md border border-l-4 px-5 py-4"
+              style={{
+                background: "#fef3c7",
+                borderColor: "#f6dba0",
+                borderLeftColor: "#8a5a00",
+              }}
+            >
+              <h3 className="text-sm font-bold text-[#8a5a00] mb-2">
+                ⚠ Zadaci s prekoračenim rokom ({metrics.overdue.length})
+              </h3>
+              <ul className="text-sm space-y-1 pl-5 list-disc">
+                {metrics.overdue.slice(0, 10).map((t) => (
+                  <li key={t.id}>
+                    <strong>{t.naziv}</strong> · {t.nekretnina_naziv} · rok{" "}
+                    {formatDate(t.rok)}
+                  </li>
+                ))}
+                {metrics.overdue.length > 10 && (
+                  <li
+                    className="italic text-muted-foreground list-none"
+                    style={{ marginLeft: "-1rem" }}
                   >
-                    <td className="py-1.5 px-2">
-                      <div className="font-medium">{t.naziv || "—"}</div>
-                      {t.opis && (
-                        <div className="text-slate-400 text-[9px] truncate max-w-[200px]">
-                          {t.opis}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-1.5 px-2 text-slate-600">
-                      {t.nekretnina_naziv}
-                    </td>
-                    <td className="py-1.5 px-2 text-center">
-                      <span className="inline-flex items-center gap-1">
-                        <span
-                          className="inline-block h-2 w-2 rounded-full"
-                          style={{
-                            backgroundColor:
-                              PRIORITY_DOT[t.prioritet] || "#94a3b8",
-                          }}
-                        />
-                        <span className="text-[10px] font-medium">
-                          {PRIORITY_LABELS[t.prioritet] || t.prioritet || "—"}
-                        </span>
-                      </span>
-                    </td>
-                    <td className="py-1.5 px-2 text-center">
-                      <span className="inline-flex items-center gap-1">
-                        <span
-                          className="inline-block h-2 w-2 rounded-full"
-                          style={{
-                            backgroundColor: STATUS_DOT[t.status] || "#94a3b8",
-                          }}
-                        />
-                        <span className="text-[10px] font-medium">
-                          {STATUS_LABELS[t.status] || t.status || "—"}
-                        </span>
-                      </span>
-                    </td>
-                    <td className="py-1.5 px-2">
-                      <span
-                        className={
-                          isOverdue
-                            ? "text-red-600 font-semibold"
-                            : "text-slate-600"
-                        }
-                      >
-                        {formatDate(t.rok)}
-                      </span>
-                    </td>
-                    <td className="py-1.5 px-2 text-right">
-                      {t.trosak_materijal != null
-                        ? formatCurrency(t.trosak_materijal)
-                        : "—"}
-                    </td>
-                    <td className="py-1.5 px-2 text-right">
-                      {t.trosak_rad != null
-                        ? formatCurrency(t.trosak_rad)
-                        : "—"}
-                    </td>
-                    <td className="py-1.5 px-2 text-slate-600">
-                      {t.dodijeljeno_naziv}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot>
-              <tr className="bg-slate-800 text-white font-semibold">
-                <td colSpan={5} className="py-2 px-2 text-right">
-                  UKUPNO:
-                </td>
-                <td className="py-2 px-2 text-right">
-                  {formatCurrency(totalMaterialCost)}
-                </td>
-                <td className="py-2 px-2 text-right">
-                  {formatCurrency(totalLaborCost)}
-                </td>
-                <td className="py-2 px-2" />
-              </tr>
-            </tfoot>
-          </table>
+                    … i još {metrics.overdue.length - 10} zadataka
+                  </li>
+                )}
+              </ul>
+            </div>
+          </>
+        )}
 
-          {/* Footer */}
-          <div className="mt-8 pt-3 border-t border-slate-200 flex justify-between text-[10px] text-slate-400">
-            <span>Riforma — Sustav za upravljanje nekretninama</span>
-            <span>Generirano: {new Date().toLocaleString("hr-HR")}</span>
-          </div>
+        <SectionTitle>Detaljan pregled zadataka</SectionTitle>
+        <DataTable>
+          <DataTableHead>
+            <tr>
+              <th className="text-left px-3 py-2 w-[28%]">Naziv</th>
+              <th className="text-left px-3 py-2">Nekretnina</th>
+              <th className="text-left px-3 py-2">Prioritet</th>
+              <th className="text-left px-3 py-2">Status</th>
+              <th className="text-left px-3 py-2">Rok</th>
+              <th className="text-right px-3 py-2">Materijal</th>
+              <th className="text-right px-3 py-2">Rad</th>
+              <th className="text-left px-3 py-2">Dodijeljeno</th>
+            </tr>
+          </DataTableHead>
+          <tbody>
+            {tasks.map((t, i) => {
+              const overdue =
+                t.rok &&
+                !["zavrseno", "arhivirano"].includes(t.status) &&
+                new Date(t.rok) < new Date();
+              return (
+                <tr
+                  key={t.id}
+                  className={`border-t border-[#0F5E4D]/10 ${i % 2 === 1 ? "bg-[#0F5E4D]/[0.02]" : ""}`}
+                  style={{ pageBreakInside: "avoid" }}
+                >
+                  <td className="px-3 py-2">
+                    <div className="font-semibold">{t.naziv || "—"}</div>
+                    {t.opis && (
+                      <div className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">
+                        {t.opis}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">{t.nekretnina_naziv}</td>
+                  <td className="px-3 py-2 text-sm">
+                    <span
+                      className="inline-block w-2 h-2 rounded-full mr-2 align-middle"
+                      style={{
+                        background:
+                          PRIORITY_COLOR[t.prioritet] || "#94a3b8",
+                      }}
+                    />
+                    {PRIORITY_LABELS[t.prioritet] || t.prioritet || "—"}
+                  </td>
+                  <td className="px-3 py-2 text-sm">
+                    <span
+                      className="inline-block w-2 h-2 rounded-full mr-2 align-middle"
+                      style={{
+                        background: STATUS_COLOR[t.status] || "#94a3b8",
+                      }}
+                    />
+                    {STATUS_LABELS[t.status] || t.status || "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">
+                    <span
+                      className={overdue ? "text-[#b42318] font-bold" : ""}
+                    >
+                      {formatDate(t.rok)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {t.trosak_materijal != null
+                      ? formatCurrency(t.trosak_materijal)
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {t.trosak_rad != null
+                      ? formatCurrency(t.trosak_rad)
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-sm">{t.dodijeljeno_naziv}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-[#0F5E4D] bg-[#0F5E4D]/5 font-bold text-[#0F5E4D]">
+              <td colSpan={5} className="px-3 py-2 text-right">
+                UKUPNO
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {formatCurrency(metrics.materialCost)}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {formatCurrency(metrics.laborCost)}
+              </td>
+              <td />
+            </tr>
+          </tfoot>
+        </DataTable>
+
+        <div className="pt-4 border-t border-[#0F5E4D]/10 flex justify-between text-[10px] text-muted-foreground">
+          <span>Riforma — Sustav za upravljanje nekretninama</span>
+          <span>Generirano: {new Date().toLocaleString("hr-HR")}</span>
         </div>
       </div>
 
@@ -640,8 +525,6 @@ const MaintenanceReport = () => {
         @media print {
           .no-print { display: none !important; }
           body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          table { width: 100%; }
-          tr { page-break-inside: avoid; }
           @page { size: A4 landscape; margin: 10mm; }
         }
       `}</style>

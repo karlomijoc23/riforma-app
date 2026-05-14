@@ -1,20 +1,28 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { api } from "../../shared/api";
 import {
   downloadPdfFromResponse,
   extractBlobErrorDetail,
 } from "../../shared/downloadBlob";
 import { formatDate, formatCurrency } from "../../shared/formatters";
-import {
-  Loader2,
-  Printer,
-  Download,
-  AlertTriangle,
-  ArrowLeft,
-} from "lucide-react";
+import { Loader2, Printer, AlertTriangle, ArrowLeft } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { toast } from "../../components/ui/sonner";
+import {
+  ReportHeader,
+  SectionTitle,
+  KpiGrid,
+  KpiCard,
+  RankCard,
+  RankRow,
+  RankList,
+  DataTable,
+  DataTableHead,
+  StatusLine,
+  VsPortfolio,
+  DownloadPdfButton,
+} from "../../shared/reportUI";
 
 const STATUS_LABELS = {
   aktivno: "Aktivno",
@@ -22,14 +30,6 @@ const STATUS_LABELS = {
   istekao: "Istekao",
   raskinuto: "Raskinuto",
   arhivirano: "Arhivirano",
-};
-
-const STATUS_DOT = {
-  aktivno: "#16a34a",
-  na_isteku: "#d97706",
-  istekao: "#dc2626",
-  raskinuto: "#6b7280",
-  arhivirano: "#94a3b8",
 };
 
 const STATUS_ORDER = {
@@ -40,9 +40,12 @@ const STATUS_ORDER = {
   arhivirano: 4,
 };
 
+const ACTIVE_STATUSES = new Set(["aktivno", "na_isteku"]);
+
 const ContractReport = () => {
   const navigate = useNavigate();
   const [contracts, setContracts] = useState([]);
+  const [units, setUnits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(null);
@@ -50,54 +53,46 @@ const ContractReport = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [contractsRes, tenantsRes, propertiesRes] = await Promise.all([
-          api.getUgovori(),
-          api.getZakupnici(),
-          api.getNekretnine(),
-        ]);
+        const [ugovoriRes, zakupniciRes, nekretnineRes, unitsRes] =
+          await Promise.all([
+            api.getUgovori(),
+            api.getZakupnici(),
+            api.getNekretnine(),
+            api.getUnits(),
+          ]);
 
-        const tenantsMap = new Map(
-          tenantsRes.data.map((t) => [String(t.id), t]),
+        const zakupniciMap = new Map(
+          zakupniciRes.data.map((z) => [String(z.id), z]),
         );
-        const propertiesMap = new Map(
-          propertiesRes.data.map((p) => [String(p.id), p]),
+        const nekretnineMap = new Map(
+          nekretnineRes.data.map((n) => [String(n.id), n]),
         );
 
-        const enrichedContracts = contractsRes.data
-          .map((c) => {
-            const tenant = tenantsMap.get(String(c.zakupnik_id));
-            const property = propertiesMap.get(String(c.nekretnina_id));
-            let daysLeft = null;
-            if (c.datum_zavrsetka) {
-              const today = new Date();
-              const end = new Date(c.datum_zavrsetka);
-              daysLeft = Math.ceil((end - today) / (1000 * 60 * 60 * 24));
-            }
-            return {
-              ...c,
-              zakupnik_naziv: tenant
-                ? tenant.naziv_firme || tenant.ime_prezime || "—"
-                : "—",
-              zakupnik_oib: tenant?.oib || "",
-              nekretnina_naziv: property ? property.naziv : "—",
-              nekretnina_adresa: property?.adresa || "",
-              daysLeft,
-            };
-          })
-          .sort((a, b) => {
-            const sa = STATUS_ORDER[a.status] ?? 5;
-            const sb = STATUS_ORDER[b.status] ?? 5;
-            if (sa !== sb) return sa - sb;
-            return (a.datum_zavrsetka || "").localeCompare(
-              b.datum_zavrsetka || "",
-            );
-          });
+        const enriched = ugovoriRes.data.map((c) => {
+          const z = zakupniciMap.get(String(c.zakupnik_id));
+          const n = nekretnineMap.get(String(c.nekretnina_id));
+          let daysLeft = null;
+          if (c.datum_zavrsetka) {
+            const today = new Date();
+            const end = new Date(c.datum_zavrsetka);
+            daysLeft = Math.ceil((end - today) / 86400000);
+          }
+          return {
+            ...c,
+            zakupnik_naziv:
+              (z && (z.naziv_firme || z.ime_prezime)) || "—",
+            zakupnik_oib: z?.oib,
+            nekretnina_naziv: n?.naziv || "—",
+            nekretnina_adresa: n?.adresa,
+            daysLeft,
+          };
+        });
 
-        setContracts(enrichedContracts);
+        setContracts(enriched);
+        setUnits(unitsRes.data || []);
       } catch (err) {
-        console.error("Failed to fetch report data", err);
+        console.error(err);
         setError("Greška pri učitavanju podataka izvještaja");
-        toast.error("Greška pri učitavanju podataka izvještaja");
       } finally {
         setLoading(false);
       }
@@ -112,7 +107,6 @@ const ContractReport = () => {
       downloadPdfFromResponse(res, "riforma-izvjestaj-ugovora.pdf");
       toast.success("PDF preuzet.");
     } catch (err) {
-      console.error("PDF generation failed", err);
       const detail = await extractBlobErrorDetail(err);
       toast.error(detail);
     } finally {
@@ -120,66 +114,155 @@ const ContractReport = () => {
     }
   }, []);
 
-  /* ─── Computed metrics ─── */
-  const activeContracts = contracts.filter((c) => c.status === "aktivno");
-  const expiringContracts = contracts.filter(
-    (c) =>
-      c.status === "na_isteku" ||
-      (c.status === "aktivno" && c.daysLeft > 0 && c.daysLeft <= 90),
-  );
-  const expiredContracts = contracts.filter((c) => c.status === "istekao");
-  const terminatedContracts = contracts.filter((c) => c.status === "raskinuto");
+  /* ─── Metrike ─── */
+  const metrics = useMemo(() => {
+    const active = contracts.filter((c) => c.status === "aktivno");
+    const expiring = contracts.filter(
+      (c) =>
+        c.status === "na_isteku" ||
+        (c.status === "aktivno" && c.daysLeft > 0 && c.daysLeft <= 90),
+    );
+    const expired = contracts.filter((c) => c.status === "istekao");
+    const terminated = contracts.filter((c) => c.status === "raskinuto");
+    const monthlyRent = active.reduce(
+      (s, c) => s + (Number(c.osnovna_zakupnina) || 0),
+      0,
+    );
+    const camTotal = active.reduce(
+      (s, c) => s + (Number(c.cam_troskovi) || 0),
+      0,
+    );
+    const indexationCount = active.filter((c) => c.indeksacija).length;
 
-  const totalMonthlyRent = activeContracts.reduce(
-    (sum, c) => sum + (Number(c.osnovna_zakupnina) || 0),
-    0,
-  );
-  const totalAnnualRent = totalMonthlyRent * 12;
-  const totalCamValue = activeContracts.reduce(
-    (sum, c) => sum + (Number(c.cam_troskovi) || 0),
-    0,
-  );
-  const indexationCount = activeContracts.filter(
-    (c) => c.indeksacija === true,
-  ).length;
+    // €/m² po ugovoru
+    const unitsById = new Map(units.map((u) => [String(u.id), u]));
+    const contractUnitIds = (c) => {
+      if (Array.isArray(c.property_unit_ids) && c.property_unit_ids.length > 0)
+        return c.property_unit_ids.map(String);
+      if (c.property_unit_id) return [String(c.property_unit_id)];
+      return [];
+    };
 
-  // Average contract duration (months)
-  const avgDuration = (() => {
-    const durations = contracts
-      .filter((c) => c.datum_pocetka && c.datum_zavrsetka)
-      .map((c) => {
-        const start = new Date(c.datum_pocetka);
-        const end = new Date(c.datum_zavrsetka);
-        return (end - start) / (1000 * 60 * 60 * 24 * 30);
+    const perContractM2 = [];
+    const perPropertyAgg = new Map(); // id -> { name, rent, area }
+    active.forEach((c) => {
+      const rent = Number(c.osnovna_zakupnina) || 0;
+      if (rent <= 0) return;
+      const ids = contractUnitIds(c);
+      const area = ids.reduce((sum, uid) => {
+        const u = unitsById.get(uid);
+        return sum + (Number(u?.povrsina_m2) || 0);
+      }, 0);
+      if (area <= 0) return;
+      const eurPerM2 = rent / area;
+      perContractM2.push({
+        id: c.id,
+        oznaka: c.interna_oznaka || "—",
+        propertyName: c.nekretnina_naziv,
+        tenantName: c.zakupnik_naziv,
+        area,
+        rent,
+        eurPerM2,
       });
-    return durations.length > 0
-      ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
-      : 0;
-  })();
+      const pid = String(c.nekretnina_id || "");
+      const existing = perPropertyAgg.get(pid) || {
+        name: c.nekretnina_naziv,
+        rent: 0,
+        area: 0,
+      };
+      existing.rent += rent;
+      existing.area += area;
+      perPropertyAgg.set(pid, existing);
+    });
 
-  // Status summary
-  const statusSummary = {};
-  contracts.forEach((c) => {
-    const s = c.status || "nepoznato";
-    statusSummary[s] = (statusSummary[s] || 0) + 1;
-  });
+    const top3 = [...perContractM2]
+      .sort((a, b) => b.eurPerM2 - a.eurPerM2)
+      .slice(0, 3);
+    const bottom3 = [...perContractM2]
+      .sort((a, b) => a.eurPerM2 - b.eurPerM2)
+      .slice(0, 3);
+    const perProperty = [...perPropertyAgg.values()]
+      .filter((p) => p.area > 0)
+      .map((p) => ({ ...p, eurPerM2: p.rent / p.area }))
+      .sort((a, b) => b.eurPerM2 - a.eurPerM2);
+    const totalRentM2 = perProperty.reduce((s, p) => s + p.rent, 0);
+    const totalAreaM2 = perProperty.reduce((s, p) => s + p.area, 0);
+    const portfolioAvgM2 = totalAreaM2 > 0 ? totalRentM2 / totalAreaM2 : 0;
+    const eurPerM2ByContract = new Map(
+      perContractM2.map((r) => [String(r.id), r.eurPerM2]),
+    );
 
-  // Revenue by property
-  const revenueByProp = {};
-  activeContracts.forEach((c) => {
-    const key = c.nekretnina_naziv || "Nepoznato";
-    revenueByProp[key] =
-      (revenueByProp[key] || 0) + (Number(c.osnovna_zakupnina) || 0);
-  });
+    // Status summary
+    const statusCounts = {};
+    contracts.forEach((c) => {
+      const s = c.status || "nepoznato";
+      statusCounts[s] = (statusCounts[s] || 0) + 1;
+    });
+    const statusSummary = Object.entries(statusCounts)
+      .map(([key, count]) => ({
+        key,
+        label: STATUS_LABELS[key] || key,
+        count,
+        pct: contracts.length
+          ? Math.round((count / contracts.length) * 100)
+          : 0,
+      }))
+      .sort(
+        (a, b) =>
+          (STATUS_ORDER[a.key] ?? 99) - (STATUS_ORDER[b.key] ?? 99),
+      );
 
-  // Contracts by tenant (top 8)
-  const contractsByTenant = {};
-  activeContracts.forEach((c) => {
-    const key = c.zakupnik_naziv || "Nepoznato";
-    if (!contractsByTenant[key]) contractsByTenant[key] = { count: 0, rent: 0 };
-    contractsByTenant[key].count++;
-    contractsByTenant[key].rent += Number(c.osnovna_zakupnina) || 0;
-  });
+    // Revenue by property (Top 5)
+    const revenueMap = new Map();
+    active.forEach((c) => {
+      const name = c.nekretnina_naziv || "Nepoznato";
+      revenueMap.set(name, (revenueMap.get(name) || 0) + (Number(c.osnovna_zakupnina) || 0));
+    });
+    const revenueSorted = [...revenueMap.entries()]
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount);
+    const revenueTop5 = revenueSorted.slice(0, 5);
+    const revenueMax = revenueTop5[0]?.amount || 1;
+    const revenueOverflow = Math.max(0, revenueSorted.length - 5);
+
+    // Top tenants
+    const tenantMap = new Map();
+    active.forEach((c) => {
+      const name = c.zakupnik_naziv || "Nepoznato";
+      const b = tenantMap.get(name) || { name, count: 0, rent: 0 };
+      b.count += 1;
+      b.rent += Number(c.osnovna_zakupnina) || 0;
+      tenantMap.set(name, b);
+    });
+    const tenantsSorted = [...tenantMap.values()].sort(
+      (a, b) => b.rent - a.rent,
+    );
+    const tenantsTop5 = tenantsSorted.slice(0, 5);
+    const tenantsMax = tenantsTop5[0]?.rent || 1;
+    const tenantsOverflow = Math.max(0, tenantsSorted.length - 5);
+
+    return {
+      active,
+      expiring,
+      expired,
+      terminated,
+      monthlyRent,
+      camTotal,
+      indexationCount,
+      top3,
+      bottom3,
+      perProperty,
+      portfolioAvgM2,
+      eurPerM2ByContract,
+      statusSummary,
+      revenueTop5,
+      revenueMax,
+      revenueOverflow,
+      tenantsTop5,
+      tenantsMax,
+      tenantsOverflow,
+    };
+  }, [contracts, units]);
 
   if (loading) {
     return (
@@ -212,465 +295,276 @@ const ContractReport = () => {
       {/* Toolbar */}
       <div className="sticky top-0 z-10 bg-white border-b shadow-sm px-6 py-3 flex items-center justify-between no-print">
         <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate("/ugovori")}
-          >
+          <Button variant="ghost" size="sm" onClick={() => navigate("/ugovori")}>
             <ArrowLeft className="h-4 w-4 mr-1" /> Natrag
           </Button>
           <h1 className="text-lg font-semibold">Izvještaj o ugovorima</h1>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDownloadPdf}
-            disabled={downloading}
-          >
-            {downloading ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="mr-1 h-4 w-4" />
-            )}
-            PDF
-          </Button>
-          <Button size="sm" onClick={() => window.print()}>
+          <DownloadPdfButton onClick={handleDownloadPdf} downloading={downloading} />
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="mr-1 h-4 w-4" /> Ispis
           </Button>
         </div>
       </div>
 
-      {/* ═══════════════════ REPORT CONTENT ═══════════════════ */}
-      <div
-        className="max-w-[1100px] mx-auto bg-white"
-        style={{
-          fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
-        }}
-      >
-        {/* Header band */}
-        <div className="bg-slate-800 text-white px-10 py-6">
-          <div className="flex items-end justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-300 mb-1">
-                Riforma
-              </p>
-              <h1 className="text-[22px] font-bold tracking-tight">
-                Izvještaj o ugovorima o zakupu
-              </h1>
-            </div>
-            <div className="text-right text-sm text-slate-300">
-              <p>Datum izvještaja</p>
-              <p className="text-white font-semibold">{reportDate}</p>
-            </div>
-          </div>
-        </div>
+      {/* Report */}
+      <div className="max-w-[1200px] mx-auto p-6 space-y-2">
+        <ReportHeader
+          eyebrow="Izvještaj o ugovorima"
+          title="Ugovori o zakupu"
+          subtitle="Pregled aktivnih, isteklih i nadolazećih ugovora s ukupnim mjesečnim prihodom."
+          metaLabel="Datum izvještaja"
+          metaValue={reportDate}
+        />
 
-        <div className="px-10 py-8 space-y-8">
-          {/* ─── KPI CARDS ─── */}
-          <div className="grid grid-cols-3 gap-4">
-            {/* Primary financial KPI */}
-            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-              <p className="text-[10px] text-emerald-600 uppercase font-semibold tracking-wide">
-                Mjesečni prihod (aktivni)
-              </p>
-              <p className="text-2xl font-bold text-emerald-800 mt-1">
-                {formatCurrency(totalMonthlyRent)}
-              </p>
-              <p className="text-[10px] text-emerald-600 mt-0.5">
-                Godišnje: {formatCurrency(totalAnnualRent)}
-              </p>
-            </div>
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <p className="text-[10px] text-blue-600 uppercase font-semibold tracking-wide">
-                CAM troškovi (mj.)
-              </p>
-              <p className="text-2xl font-bold text-blue-800 mt-1">
-                {formatCurrency(totalCamValue)}
-              </p>
-              <p className="text-[10px] text-blue-600 mt-0.5">
-                Ukupno mj. s CAM:{" "}
-                {formatCurrency(totalMonthlyRent + totalCamValue)}
-              </p>
-            </div>
-            <div className="bg-slate-800 rounded-lg p-4 text-white">
-              <p className="text-[10px] text-slate-300 uppercase font-semibold tracking-wide">
-                Ukupno ugovora
-              </p>
-              <p className="text-2xl font-bold mt-1">{contracts.length}</p>
-              <p className="text-[10px] text-slate-400 mt-0.5">
-                {activeContracts.length} aktivnih
-              </p>
-            </div>
-          </div>
+        <SectionTitle>Ključni pokazatelji</SectionTitle>
+        <KpiGrid>
+          <KpiCard
+            variant="accent"
+            label="Mjesečni prihod"
+            value={formatCurrency(metrics.monthlyRent)}
+            sub={`Godišnje ${formatCurrency(metrics.monthlyRent * 12)}`}
+          />
+          <KpiCard
+            variant="info"
+            label="CAM troškovi (mj.)"
+            value={formatCurrency(metrics.camTotal)}
+            sub={`Ukupno s CAM-om ${formatCurrency(metrics.monthlyRent + metrics.camTotal)}`}
+          />
+          <KpiCard
+            label="Ukupno ugovora"
+            value={contracts.length}
+            sub={`Aktivnih ${metrics.active.length} · S indeksacijom ${metrics.indexationCount}`}
+          />
+          <KpiCard
+            label="Pažnja"
+            value={metrics.expiring.length}
+            sub={`Na isteku <90d · Isteklih ${metrics.expired.length} · Raskinutih ${metrics.terminated.length}`}
+          />
+        </KpiGrid>
 
-          {/* ─── Secondary KPIs ─── */}
-          <div className="grid grid-cols-5 gap-3">
-            {[
-              {
-                label: "Aktivnih",
-                value: activeContracts.length,
-                color: "text-emerald-700",
-              },
-              {
-                label: "Na isteku (90d)",
-                value: expiringContracts.length,
-                color:
-                  expiringContracts.length > 0
-                    ? "text-amber-700"
-                    : "text-slate-700",
-              },
-              {
-                label: "Isteklih",
-                value: expiredContracts.length,
-                color:
-                  expiredContracts.length > 0
-                    ? "text-red-700"
-                    : "text-slate-700",
-              },
-              {
-                label: "Raskinutih",
-                value: terminatedContracts.length,
-                color: "text-slate-700",
-              },
-              {
-                label: "S indeksacijom",
-                value: `${indexationCount} / ${activeContracts.length}`,
-                color: "text-slate-700",
-              },
-            ].map((kpi, i) => (
-              <div key={i} className="border border-slate-200 rounded-lg p-3">
-                <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wide">
-                  {kpi.label}
-                </p>
-                <p className={`text-lg font-bold mt-0.5 ${kpi.color}`}>
-                  {kpi.value}
-                </p>
-              </div>
-            ))}
-          </div>
+        {metrics.statusSummary.length > 0 && (
+          <StatusLine items={metrics.statusSummary} />
+        )}
 
-          {/* ─── Average duration stat ─── */}
-          <div className="flex items-center gap-3 text-xs text-slate-500 border-b border-slate-200 pb-3">
-            <span>
-              Prosječno trajanje ugovora:{" "}
-              <span className="font-semibold text-slate-700">
-                {avgDuration} mj.
-              </span>
-            </span>
-          </div>
-
-          {/* ─── Status + Revenue ─── */}
-          <div className="grid grid-cols-2 gap-8">
-            {/* Status breakdown */}
-            <div>
-              <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-                Raspodjela po statusu
-              </h3>
-              <div className="space-y-2.5">
-                {Object.entries(statusSummary)
-                  .sort(
-                    ([a], [b]) =>
-                      (STATUS_ORDER[a] ?? 99) - (STATUS_ORDER[b] ?? 99),
-                  )
-                  .map(([status, count]) => {
-                    const pct =
-                      contracts.length > 0
-                        ? Math.round((count / contracts.length) * 100)
-                        : 0;
-                    return (
-                      <div
-                        key={status}
-                        className="flex items-center gap-2 text-xs"
-                      >
-                        <span
-                          className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
-                          style={{
-                            backgroundColor: STATUS_DOT[status] || "#94a3b8",
-                          }}
-                        />
-                        <span className="w-24 font-medium">
-                          {STATUS_LABELS[status] || status}
-                        </span>
-                        <div className="flex-1 h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full transition-all"
-                            style={{
-                              width: `${pct}%`,
-                              backgroundColor: STATUS_DOT[status] || "#94a3b8",
-                            }}
-                          />
-                        </div>
-                        <span className="font-bold w-8 text-right tabular-nums">
-                          {count}
-                        </span>
-                        <span className="text-slate-400 w-10 text-right tabular-nums">
-                          {pct}%
-                        </span>
-                      </div>
-                    );
-                  })}
-              </div>
-            </div>
-
-            {/* Revenue by property */}
-            <div>
-              <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-                Prihod po nekretnini (mjesečno)
-              </h3>
-              <div className="space-y-2">
-                {Object.entries(revenueByProp)
-                  .sort(([, a], [, b]) => b - a)
-                  .map(([name, revenue]) => {
-                    const pct =
-                      totalMonthlyRent > 0
-                        ? Math.round((revenue / totalMonthlyRent) * 100)
-                        : 0;
-                    return (
-                      <div
-                        key={name}
-                        className="flex items-center gap-3 text-xs"
-                      >
-                        <span className="truncate flex-1 min-w-0 font-medium">
-                          {name}
-                        </span>
-                        <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden shrink-0">
-                          <div
-                            className="h-full rounded-full bg-emerald-500"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                        <span className="font-bold shrink-0 tabular-nums w-24 text-right">
-                          {formatCurrency(revenue)}
-                        </span>
-                        <span className="text-slate-400 w-10 text-right shrink-0 tabular-nums">
-                          {pct}%
-                        </span>
-                      </div>
-                    );
-                  })}
-                {Object.keys(revenueByProp).length === 0 && (
-                  <p className="text-xs text-slate-400 py-2">
-                    Nema aktivnih ugovora
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ─── Top tenants ─── */}
-          <div>
-            <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-              Aktivni ugovori po zakupniku
-            </h3>
-            <div className="grid grid-cols-2 gap-x-8 gap-y-1.5">
-              {Object.entries(contractsByTenant)
-                .sort(([, a], [, b]) => b.rent - a.rent)
-                .slice(0, 10)
-                .map(([name, data]) => (
-                  <div
-                    key={name}
-                    className="flex items-center justify-between text-xs py-1 border-b border-slate-50"
-                  >
-                    <span className="truncate flex-1 min-w-0 font-medium">
-                      {name}
-                    </span>
-                    <span className="text-slate-500 shrink-0 mx-2 tabular-nums">
-                      {data.count} ug.
-                    </span>
-                    <span className="font-bold shrink-0 tabular-nums text-emerald-700">
-                      {formatCurrency(data.rent)}/mj
-                    </span>
-                  </div>
-                ))}
-              {Object.keys(contractsByTenant).length === 0 && (
-                <p className="text-xs text-slate-400 py-2 col-span-2">
-                  Nema aktivnih ugovora
-                </p>
+        {(metrics.top3.length > 0 || metrics.bottom3.length > 0) && (
+          <>
+            <SectionTitle
+              hint={
+                metrics.portfolioAvgM2 > 0
+                  ? `portfelj prosjek ${formatCurrency(metrics.portfolioAvgM2)}/m²`
+                  : null
+              }
+            >
+              Analiza zakupnine po m²
+            </SectionTitle>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {metrics.top3.length > 0 && (
+                <RankCard
+                  title="Top 3 najbolje plaćeno"
+                  sub="€ / m² · aktivni ugovori"
+                  tone="top"
+                >
+                  {metrics.top3.map((r, i) => (
+                    <RankRow
+                      key={r.id}
+                      rank={i + 1}
+                      tone="top"
+                      primary={`${r.propertyName} · ${r.tenantName}`}
+                      secondary={`Ugovor ${r.oznaka} · ${r.area.toFixed(0)} m² · ${formatCurrency(r.rent)}/mj`}
+                      value={formatCurrency(r.eurPerM2)}
+                      unit="/m²"
+                    />
+                  ))}
+                </RankCard>
+              )}
+              {metrics.bottom3.length > 0 && (
+                <RankCard
+                  title="Top 3 najslabije plaćeno"
+                  sub="€ / m² · aktivni ugovori"
+                  tone="bottom"
+                >
+                  {metrics.bottom3.map((r, i) => (
+                    <RankRow
+                      key={r.id}
+                      rank={i + 1}
+                      tone="bottom"
+                      primary={`${r.propertyName} · ${r.tenantName}`}
+                      secondary={`Ugovor ${r.oznaka} · ${r.area.toFixed(0)} m² · ${formatCurrency(r.rent)}/mj`}
+                      value={formatCurrency(r.eurPerM2)}
+                      unit="/m²"
+                    />
+                  ))}
+                </RankCard>
               )}
             </div>
-          </div>
+          </>
+        )}
 
-          {/* ─── Expiring soon warning ─── */}
-          {expiringContracts.length > 0 && (
-            <div className="border-l-4 border-amber-400 bg-amber-50 rounded-r-lg p-4">
-              <h3 className="text-xs font-bold text-amber-800 flex items-center gap-1.5 mb-2">
-                <AlertTriangle className="h-3.5 w-3.5" />
-                Ugovori koji uskoro istječu ({expiringContracts.length})
-              </h3>
-              <table className="w-full text-[11px]">
-                <thead>
-                  <tr className="text-amber-700">
-                    <th className="text-left py-1 font-semibold">
-                      Br. ugovora
-                    </th>
-                    <th className="text-left py-1 font-semibold">Zakupnik</th>
-                    <th className="text-left py-1 font-semibold">Nekretnina</th>
-                    <th className="text-left py-1 font-semibold">Istječe</th>
-                    <th className="text-right py-1 font-semibold">Preostalo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expiringContracts.slice(0, 8).map((c) => (
+        {metrics.perProperty.length > 0 && (
+          <>
+            <SectionTitle>Prosjek € / m² po nekretnini</SectionTitle>
+            <DataTable>
+              <DataTableHead>
+                <tr>
+                  <th className="text-left px-3 py-2">Nekretnina</th>
+                  <th className="text-right px-3 py-2">Površina</th>
+                  <th className="text-right px-3 py-2">Mj. zakupnina</th>
+                  <th className="text-right px-3 py-2">Prosjek € / m²</th>
+                  <th className="text-right px-3 py-2">vs portfelj</th>
+                </tr>
+              </DataTableHead>
+              <tbody>
+                {metrics.perProperty.map((p, i) => {
+                  const diff =
+                    metrics.portfolioAvgM2 > 0
+                      ? ((p.eurPerM2 - metrics.portfolioAvgM2) /
+                          metrics.portfolioAvgM2) *
+                        100
+                      : null;
+                  return (
                     <tr
-                      key={c.id}
-                      className="border-t border-amber-200/50 text-amber-900"
+                      key={p.name + i}
+                      className="border-t border-[#0F5E4D]/10"
                     >
-                      <td className="py-1 font-mono font-medium">
-                        {c.interna_oznaka || "—"}
+                      <td className="px-3 py-2 font-semibold">{p.name}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {p.area.toFixed(0)} m²
                       </td>
-                      <td className="py-1">{c.zakupnik_naziv}</td>
-                      <td className="py-1">{c.nekretnina_naziv}</td>
-                      <td className="py-1">{formatDate(c.datum_zavrsetka)}</td>
-                      <td className="py-1 text-right font-semibold">
-                        {c.daysLeft != null ? `${c.daysLeft} d` : "—"}
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {formatCurrency(p.rent)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                        {formatCurrency(p.eurPerM2)}/m²
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        <VsPortfolio pct={diff} />
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              {expiringContracts.length > 8 && (
-                <p className="text-[11px] text-amber-600 italic mt-1">
-                  ...i još {expiringContracts.length - 8} ugovora
-                </p>
-              )}
+                  );
+                })}
+              </tbody>
+            </DataTable>
+          </>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+          {metrics.revenueTop5.length > 0 && (
+            <div>
+              <SectionTitle>Top 5 prihoda po nekretnini</SectionTitle>
+              <RankList
+                items={metrics.revenueTop5.map((r) => ({
+                  name: r.name,
+                  value: r.amount,
+                  barWidth: Math.round((r.amount / metrics.revenueMax) * 100),
+                }))}
+                valueFormatter={formatCurrency}
+                overflow={metrics.revenueOverflow}
+              />
             </div>
           )}
+          {metrics.tenantsTop5.length > 0 && (
+            <div>
+              <SectionTitle>Top 5 zakupnika (mj. prihod)</SectionTitle>
+              <RankList
+                items={metrics.tenantsTop5.map((t) => ({
+                  name: t.name,
+                  value: t.rent,
+                  hint: `${t.count} ugovor${t.count === 1 ? "" : "a"}`,
+                  barWidth: Math.round((t.rent / metrics.tenantsMax) * 100),
+                }))}
+                valueFormatter={formatCurrency}
+                overflow={metrics.tenantsOverflow}
+              />
+            </div>
+          )}
+        </div>
 
-          {/* ─── Main table ─── */}
-          <div>
-            <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2 border-b border-slate-200 pb-1">
-              Detaljan pregled svih ugovora
-            </h3>
-            <table className="w-full border-collapse text-[11px]">
-              <thead>
-                <tr className="bg-slate-800 text-white">
-                  <th className="text-left py-2.5 px-3 font-semibold">
-                    Br. ugovora
-                  </th>
-                  <th className="text-left py-2.5 px-3 font-semibold">
-                    Zakupnik
-                  </th>
-                  <th className="text-left py-2.5 px-3 font-semibold">
-                    Nekretnina
-                  </th>
-                  <th className="text-left py-2.5 px-3 font-semibold">
-                    Početak
-                  </th>
-                  <th className="text-left py-2.5 px-3 font-semibold">
-                    Završetak
-                  </th>
-                  <th className="text-right py-2.5 px-3 font-semibold">
-                    Zakupnina
-                  </th>
-                  <th className="text-right py-2.5 px-3 font-semibold">CAM</th>
-                  <th className="text-center py-2.5 px-3 font-semibold">
-                    Indeks.
-                  </th>
-                  <th className="text-center py-2.5 px-3 font-semibold">
-                    Status
-                  </th>
+        <SectionTitle>Detaljan pregled ugovora</SectionTitle>
+        <DataTable>
+          <DataTableHead>
+            <tr>
+              <th className="text-left px-3 py-2">Oznaka</th>
+              <th className="text-left px-3 py-2">Zakupnik</th>
+              <th className="text-left px-3 py-2">Nekretnina</th>
+              <th className="text-left px-3 py-2">Početak</th>
+              <th className="text-left px-3 py-2">Završetak</th>
+              <th className="text-right px-3 py-2">Mj. zakupnina</th>
+              <th className="text-right px-3 py-2">Prosjek € / m²</th>
+              <th className="text-right px-3 py-2">vs portfelj</th>
+            </tr>
+          </DataTableHead>
+          <tbody>
+            {contracts.map((c, i) => {
+              const eurPerM2 = metrics.eurPerM2ByContract.get(String(c.id));
+              const vs =
+                eurPerM2 != null && metrics.portfolioAvgM2 > 0
+                  ? ((eurPerM2 - metrics.portfolioAvgM2) /
+                      metrics.portfolioAvgM2) *
+                    100
+                  : null;
+              return (
+                <tr
+                  key={c.id}
+                  className={`border-t border-[#0F5E4D]/10 ${i % 2 === 1 ? "bg-[#0F5E4D]/[0.02]" : ""}`}
+                  style={{ pageBreakInside: "avoid" }}
+                >
+                  <td className="px-3 py-2 font-semibold">
+                    {c.interna_oznaka || "—"}
+                  </td>
+                  <td className="px-3 py-2">{c.zakupnik_naziv}</td>
+                  <td className="px-3 py-2">{c.nekretnina_naziv}</td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {formatDate(c.datum_pocetka)}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">
+                    <span
+                      className={
+                        c.daysLeft != null && c.daysLeft <= 90 && c.daysLeft >= 0
+                          ? "text-amber-700 font-semibold"
+                          : c.daysLeft != null && c.daysLeft < 0
+                            ? "text-red-700 font-semibold"
+                            : ""
+                      }
+                    >
+                      {formatDate(c.datum_zavrsetka)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                    {formatCurrency(c.osnovna_zakupnina)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {eurPerM2 != null ? `${formatCurrency(eurPerM2)}/m²` : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    <VsPortfolio pct={vs} />
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {contracts.map((c, i) => (
-                  <tr
-                    key={c.id}
-                    className={`border-b border-slate-100 ${i % 2 === 0 ? "bg-white" : "bg-slate-50/60"}`}
-                    style={{ pageBreakInside: "avoid" }}
-                  >
-                    <td className="py-2 px-3 font-mono font-medium text-slate-700">
-                      {c.interna_oznaka || "—"}
-                    </td>
-                    <td className="py-2 px-3">
-                      <div className="font-medium leading-tight">
-                        {c.zakupnik_naziv}
-                      </div>
-                      {c.zakupnik_oib && (
-                        <div className="text-slate-400 text-[9px] mt-0.5">
-                          OIB: {c.zakupnik_oib}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-2 px-3">
-                      <div className="leading-tight">{c.nekretnina_naziv}</div>
-                      {c.nekretnina_adresa && (
-                        <div className="text-slate-400 text-[9px] mt-0.5">
-                          {c.nekretnina_adresa}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-2 px-3 text-slate-600 tabular-nums">
-                      {formatDate(c.datum_pocetka)}
-                    </td>
-                    <td className="py-2 px-3 tabular-nums">
-                      <span
-                        className={
-                          c.daysLeft != null &&
-                          c.daysLeft <= 90 &&
-                          c.daysLeft >= 0
-                            ? "text-amber-700 font-semibold"
-                            : c.daysLeft != null && c.daysLeft < 0
-                              ? "text-red-600 font-semibold"
-                              : "text-slate-600"
-                        }
-                      >
-                        {formatDate(c.datum_zavrsetka)}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3 text-right font-semibold tabular-nums">
-                      {formatCurrency(c.osnovna_zakupnina)}
-                    </td>
-                    <td className="py-2 px-3 text-right text-slate-500 tabular-nums">
-                      {c.cam_troskovi ? formatCurrency(c.cam_troskovi) : "—"}
-                    </td>
-                    <td className="py-2 px-3 text-center">
-                      {c.indeksacija ? (
-                        <span className="text-emerald-600 font-semibold">
-                          Da
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">Ne</span>
-                      )}
-                    </td>
-                    <td className="py-2 px-3 text-center">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span
-                          className="inline-block h-2 w-2 rounded-full"
-                          style={{
-                            backgroundColor: STATUS_DOT[c.status] || "#94a3b8",
-                          }}
-                        />
-                        <span className="text-[10px] font-medium">
-                          {STATUS_LABELS[c.status] || c.status}
-                        </span>
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="bg-slate-800 text-white font-semibold">
-                  <td colSpan={5} className="py-2.5 px-3 text-right">
-                    UKUPNO (aktivni):
-                  </td>
-                  <td className="py-2.5 px-3 text-right tabular-nums">
-                    {formatCurrency(totalMonthlyRent)}
-                  </td>
-                  <td className="py-2.5 px-3 text-right tabular-nums">
-                    {formatCurrency(totalCamValue)}
-                  </td>
-                  <td colSpan={2} className="py-2.5 px-3" />
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-[#0F5E4D] bg-[#0F5E4D]/5">
+              <td colSpan={5} className="px-3 py-2 text-right font-bold text-[#0F5E4D]">
+                UKUPNO (aktivni)
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums font-bold text-[#0F5E4D]">
+                {formatCurrency(metrics.monthlyRent)}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums font-bold text-[#0F5E4D]">
+                {metrics.portfolioAvgM2 > 0
+                  ? `${formatCurrency(metrics.portfolioAvgM2)}/m²`
+                  : "—"}
+              </td>
+              <td />
+            </tr>
+          </tfoot>
+        </DataTable>
 
-          {/* ─── Footer ─── */}
-          <div className="pt-4 border-t border-slate-200 flex justify-between text-[10px] text-slate-400">
-            <span>Riforma — Sustav za upravljanje nekretninama</span>
-            <span>Generirano: {new Date().toLocaleString("hr-HR")}</span>
-          </div>
+        <div className="pt-4 border-t border-[#0F5E4D]/10 flex justify-between text-[10px] text-muted-foreground">
+          <span>Riforma — Sustav za upravljanje nekretninama</span>
+          <span>Generirano: {new Date().toLocaleString("hr-HR")}</span>
         </div>
       </div>
 
@@ -678,8 +572,6 @@ const ContractReport = () => {
         @media print {
           .no-print { display: none !important; }
           body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          table { width: 100%; }
-          tr { page-break-inside: avoid; }
           @page { size: A4 landscape; margin: 10mm; }
         }
       `}</style>

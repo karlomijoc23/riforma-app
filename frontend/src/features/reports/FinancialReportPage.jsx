@@ -1,23 +1,8 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { api } from "../../shared/api";
 import { formatCurrency } from "../../shared/formatters";
-import { Loader2, ArrowLeft, TrendingUp, Receipt, Wallet } from "lucide-react";
+import { Loader2, ArrowLeft } from "lucide-react";
 import { Button } from "../../components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "../../components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../../components/ui/table";
-import { Badge } from "../../components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -27,6 +12,15 @@ import {
 } from "../../components/ui/select";
 import { useNavigate } from "react-router-dom";
 import { toast } from "../../components/ui/sonner";
+import {
+  ReportHeader,
+  SectionTitle,
+  KpiGrid,
+  KpiCard,
+  DataTable,
+  DataTableHead,
+  StatusPill,
+} from "../../shared/reportUI";
 
 const UTILITY_LABELS = {
   struja: "Struja",
@@ -35,6 +29,21 @@ const UTILITY_LABELS = {
   komunalije: "Komunalije",
   internet: "Internet",
   ostalo: "Ostalo",
+};
+
+const MONTH_NAMES = {
+  "01": "Siječanj",
+  "02": "Veljača",
+  "03": "Ožujak",
+  "04": "Travanj",
+  "05": "Svibanj",
+  "06": "Lipanj",
+  "07": "Srpanj",
+  "08": "Kolovoz",
+  "09": "Rujan",
+  10: "Listopad",
+  11: "Studeni",
+  12: "Prosinac",
 };
 
 const FinancialReportPage = () => {
@@ -89,23 +98,19 @@ const FinancialReportPage = () => {
     fetchData();
   }, [selectedYear]);
 
-  // Derive income from active contracts (monthly rent * 12 or proportional)
   const totalIncome = useMemo(() => {
     return contracts.reduce((sum, c) => {
       const mjesecnaRenta = parseFloat(c.osnovna_zakupnina || 0);
-      // Assume yearly income = monthly rent * 12
       return sum + mjesecnaRenta * 12;
     }, 0);
   }, [contracts]);
 
-  // Compute monthly breakdown from racuni
   const monthlyData = useMemo(() => {
     const months = {};
     for (let m = 1; m <= 12; m++) {
       const key = String(m).padStart(2, "0");
       months[key] = { rashodi: 0 };
     }
-
     racuni.forEach((r) => {
       const datum = r.datum_racuna || "";
       if (datum.length >= 7) {
@@ -115,9 +120,7 @@ const FinancialReportPage = () => {
         }
       }
     });
-
     const monthlyIncome = contracts.length > 0 ? totalIncome / 12 : 0;
-
     return Object.entries(months)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([month, vals]) => ({
@@ -128,7 +131,6 @@ const FinancialReportPage = () => {
       }));
   }, [racuni, contracts, totalIncome, selectedYear]);
 
-  // Expenses by type with percentages
   const expensesByType = useMemo(() => {
     if (!data?.po_tipu) return [];
     const total = data.ukupno_iznos || 0;
@@ -152,37 +154,14 @@ const FinancialReportPage = () => {
     );
   }
 
-  const MONTH_NAMES = {
-    "01": "Siječanj",
-    "02": "Veljača",
-    "03": "Ožujak",
-    "04": "Travanj",
-    "05": "Svibanj",
-    "06": "Lipanj",
-    "07": "Srpanj",
-    "08": "Kolovoz",
-    "09": "Rujan",
-    10: "Listopad",
-    11: "Studeni",
-    12: "Prosinac",
-  };
-
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      {/* Header */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="min-h-screen bg-gray-50">
+      <div className="sticky top-0 z-10 bg-white border-b shadow-sm px-6 py-3 flex items-center justify-between no-print">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={() => navigate("/racuni")}>
             <ArrowLeft className="h-4 w-4 mr-1" /> Natrag
           </Button>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              Financijski izvještaj
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Pregled prihoda, rashoda i neto dobiti/gubitka
-            </p>
-          </div>
+          <h1 className="text-lg font-semibold">Financijski izvještaj</h1>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Godina:</span>
@@ -201,182 +180,191 @@ const FinancialReportPage = () => {
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Prihodi (ugovori)
-            </CardTitle>
-            <TrendingUp className="h-4 w-4 text-emerald-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-emerald-700">
-              {formatCurrency(totalIncome)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {contracts.length} aktivnih ugovora
-            </p>
-          </CardContent>
-        </Card>
+      <div className="max-w-[1200px] mx-auto p-6 space-y-2">
+        <ReportHeader
+          eyebrow="Financijski izvještaj"
+          title={`Prihodi i rashodi · ${selectedYear}`}
+          subtitle="Pregled godišnjih prihoda iz ugovora, rashoda iz računa i neto rezultata."
+          metaLabel="Razdoblje"
+          metaValue={`01.01. – 31.12. ${selectedYear}.`}
+        />
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Rashodi (računi)
-            </CardTitle>
-            <Receipt className="h-4 w-4 text-red-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-700">
-              {formatCurrency(totalExpenses)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {data?.ukupno_racuna || 0} računa u {selectedYear}.
-            </p>
-          </CardContent>
-        </Card>
+        <SectionTitle>Ključni pokazatelji</SectionTitle>
+        <KpiGrid>
+          <KpiCard
+            variant="positive"
+            label="Prihodi (ugovori)"
+            value={formatCurrency(totalIncome)}
+            sub={`${contracts.length} aktivnih ugovora`}
+          />
+          <KpiCard
+            label="Rashodi (računi)"
+            value={formatCurrency(totalExpenses)}
+            sub={`${data?.ukupno_racuna || 0} računa u ${selectedYear}.`}
+          />
+          <KpiCard
+            variant={netPL >= 0 ? "accent" : "default"}
+            label="Neto dobit / gubitak"
+            value={formatCurrency(netPL)}
+            sub={netPL >= 0 ? "Dobit" : "Gubitak"}
+          />
+          <KpiCard
+            variant="info"
+            label="Mjesečno (prosjek)"
+            value={formatCurrency(netPL / 12)}
+            sub="neto po mjesecu"
+          />
+        </KpiGrid>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Neto dobit/gubitak
-            </CardTitle>
-            <Wallet className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div
-              className={`text-2xl font-bold ${netPL >= 0 ? "text-emerald-700" : "text-red-700"}`}
-            >
-              {formatCurrency(netPL)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              <Badge variant={netPL >= 0 ? "success" : "destructive"}>
-                {netPL >= 0 ? "Dobit" : "Gubitak"}
-              </Badge>
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Expenses breakdown and monthly summary */}
-      <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Expenses by type */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Rashodi po tipu utroška</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+          <div>
+            <SectionTitle>Rashodi po tipu utroška</SectionTitle>
             {expensesByType.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nema podataka</p>
+              <div className="text-sm text-muted-foreground p-3 border border-dashed border-[#0F5E4D]/15 rounded-md">
+                Nema podataka
+              </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Tip</TableHead>
-                    <TableHead className="text-right">Iznos</TableHead>
-                    <TableHead className="text-right">Postotak</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {expensesByType.map((row) => (
-                    <TableRow key={row.tip}>
-                      <TableCell className="font-medium">
+              <DataTable>
+                <DataTableHead>
+                  <tr>
+                    <th className="text-left px-3 py-2">Tip</th>
+                    <th className="text-right px-3 py-2">Iznos</th>
+                    <th className="text-right px-3 py-2">Postotak</th>
+                  </tr>
+                </DataTableHead>
+                <tbody>
+                  {expensesByType.map((row, i) => (
+                    <tr
+                      key={row.tip}
+                      className={`border-t border-[#0F5E4D]/10 ${i % 2 === 1 ? "bg-[#0F5E4D]/[0.02]" : ""}`}
+                    >
+                      <td className="px-3 py-2 font-medium">
                         {UTILITY_LABELS[row.tip] || row.tip}
-                      </TableCell>
-                      <TableCell className="text-right">
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
                         {formatCurrency(row.iznos)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {row.postotak.toFixed(1)}%
-                      </TableCell>
-                    </TableRow>
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                        {row.postotak.toFixed(1)} %
+                      </td>
+                    </tr>
                   ))}
-                </TableBody>
-              </Table>
+                </tbody>
+              </DataTable>
             )}
-          </CardContent>
-        </Card>
+          </div>
 
-        {/* Status breakdown */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Pregled po statusu</CardTitle>
-          </CardHeader>
-          <CardContent>
+          <div>
+            <SectionTitle>Pregled po statusu</SectionTitle>
             {!data?.po_statusu || Object.keys(data.po_statusu).length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nema podataka</p>
+              <div className="text-sm text-muted-foreground p-3 border border-dashed border-[#0F5E4D]/15 rounded-md">
+                Nema podataka
+              </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Broj računa</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+              <DataTable>
+                <DataTableHead>
+                  <tr>
+                    <th className="text-left px-3 py-2">Status</th>
+                    <th className="text-right px-3 py-2">Broj računa</th>
+                  </tr>
+                </DataTableHead>
+                <tbody>
                   {Object.entries(data.po_statusu)
                     .sort(([, a], [, b]) => b - a)
-                    .map(([status, count]) => (
-                      <TableRow key={status}>
-                        <TableCell className="font-medium">
-                          <Badge variant="outline">
+                    .map(([status, count], i) => (
+                      <tr
+                        key={status}
+                        className={`border-t border-[#0F5E4D]/10 ${i % 2 === 1 ? "bg-[#0F5E4D]/[0.02]" : ""}`}
+                      >
+                        <td className="px-3 py-2">
+                          <StatusPill
+                            tone={
+                              status === "placeno"
+                                ? "positive"
+                                : status === "ceka_placanje"
+                                  ? "info"
+                                  : "warn"
+                            }
+                          >
                             {status.replace(/_/g, " ")}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">{count}</TableCell>
-                      </TableRow>
+                          </StatusPill>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                          {count}
+                        </td>
+                      </tr>
                     ))}
-                </TableBody>
-              </Table>
+                </tbody>
+              </DataTable>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+
+        <SectionTitle>Mjesečni pregled · {selectedYear}</SectionTitle>
+        <DataTable>
+          <DataTableHead>
+            <tr>
+              <th className="text-left px-3 py-2">Mjesec</th>
+              <th className="text-right px-3 py-2">Prihodi</th>
+              <th className="text-right px-3 py-2">Rashodi</th>
+              <th className="text-right px-3 py-2">Neto</th>
+            </tr>
+          </DataTableHead>
+          <tbody>
+            {monthlyData.map((row, i) => {
+              const monthKey = row.month.substring(5, 7);
+              return (
+                <tr
+                  key={row.month}
+                  className={`border-t border-[#0F5E4D]/10 ${i % 2 === 1 ? "bg-[#0F5E4D]/[0.02]" : ""}`}
+                >
+                  <td className="px-3 py-2 font-medium">
+                    {MONTH_NAMES[monthKey] || row.month}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-[#0f6a44]">
+                    {formatCurrency(row.prihodi)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-[#b42318]">
+                    {formatCurrency(row.rashodi)}
+                  </td>
+                  <td
+                    className={`px-3 py-2 text-right tabular-nums font-semibold ${row.neto >= 0 ? "text-[#0f6a44]" : "text-[#b42318]"}`}
+                  >
+                    {formatCurrency(row.neto)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-[#0F5E4D] bg-[#0F5E4D]/5 font-bold text-[#0F5E4D]">
+              <td className="px-3 py-2">UKUPNO {selectedYear}</td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {formatCurrency(totalIncome)}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {formatCurrency(totalExpenses)}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {formatCurrency(netPL)}
+              </td>
+            </tr>
+          </tfoot>
+        </DataTable>
+
+        <div className="pt-4 mt-6 border-t border-[#0F5E4D]/10 flex justify-between text-[10px] text-muted-foreground">
+          <span>Riforma — Sustav za upravljanje nekretninama</span>
+          <span>Generirano: {new Date().toLocaleString("hr-HR")}</span>
+        </div>
       </div>
 
-      {/* Monthly summary */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Mjesečni pregled - {selectedYear}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Mjesec</TableHead>
-                <TableHead className="text-right">Prihodi</TableHead>
-                <TableHead className="text-right">Rashodi</TableHead>
-                <TableHead className="text-right">Neto</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {monthlyData.map((row) => {
-                const monthKey = row.month.substring(5, 7);
-                return (
-                  <TableRow key={row.month}>
-                    <TableCell className="font-medium">
-                      {MONTH_NAMES[monthKey] || row.month}
-                    </TableCell>
-                    <TableCell className="text-right text-emerald-700">
-                      {formatCurrency(row.prihodi)}
-                    </TableCell>
-                    <TableCell className="text-right text-red-700">
-                      {formatCurrency(row.rashodi)}
-                    </TableCell>
-                    <TableCell
-                      className={`text-right font-semibold ${row.neto >= 0 ? "text-emerald-700" : "text-red-700"}`}
-                    >
-                      {formatCurrency(row.neto)}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          @page { size: A4 portrait; margin: 12mm; }
+        }
+      `}</style>
     </div>
   );
 };

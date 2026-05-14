@@ -9,12 +9,22 @@ import { formatCurrency, formatDate } from "../../shared/formatters";
 import {
   Loader2,
   Printer,
-  Download,
   ArrowLeft,
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { toast } from "../../components/ui/sonner";
+import {
+  ReportHeader,
+  SectionTitle,
+  KpiGrid,
+  KpiCard,
+  DataTable,
+  DataTableHead,
+  StatusPill,
+  DownloadPdfButton,
+  REPORT_COLORS,
+} from "../../shared/reportUI";
 
 const STATUS_LABELS = {
   planning: "Planiranje",
@@ -24,19 +34,26 @@ const STATUS_LABELS = {
   cancelled: "Otkazano",
 };
 
-const STATUS_DOT = {
-  planning: "#6366f1",
-  in_progress: "#3b82f6",
-  completed: "#10b981",
-  on_hold: "#d97706",
-  cancelled: "#dc2626",
+const STATUS_TONE = {
+  planning: "info",
+  in_progress: "info",
+  completed: "positive",
+  on_hold: "warn",
+  cancelled: "danger",
 };
 
-const PHASE_STATUS_DOT = {
-  pending: "#94a3b8",
-  in_progress: "#3b82f6",
-  completed: "#10b981",
-  delayed: "#dc2626",
+const PHASE_TONE = {
+  pending: "neutral",
+  in_progress: "info",
+  completed: "positive",
+  delayed: "danger",
+};
+
+const PHASE_LABEL = {
+  pending: "Čeka",
+  in_progress: "U tijeku",
+  completed: "Završeno",
+  delayed: "Kasni",
 };
 
 export default function ProjectReportPage() {
@@ -72,7 +89,6 @@ export default function ProjectReportPage() {
       downloadPdfFromResponse(res, `riforma-projekt-${safeName}.pdf`);
       toast.success("PDF preuzet.");
     } catch (err) {
-      console.error("PDF generation failed", err);
       const detail = await extractBlobErrorDetail(err);
       toast.error(detail);
     } finally {
@@ -87,7 +103,6 @@ export default function ProjectReportPage() {
       </div>
     );
   }
-
   if (!project) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4">
@@ -100,7 +115,6 @@ export default function ProjectReportPage() {
     );
   }
 
-  // Computed
   const budget = Number(project.budget) || 0;
   const spent = Number(project.spent) || 0;
   const remaining = budget - spent;
@@ -118,6 +132,7 @@ export default function ProjectReportPage() {
   const totalExpense = transactions
     .filter((t) => t.type !== "income")
     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const netAmount = totalIncome - totalExpense;
 
   const documents = project.documents || [];
 
@@ -127,9 +142,16 @@ export default function ProjectReportPage() {
     year: "numeric",
   });
 
+  // Boja progress bara prema iskorištenosti
+  const barGradient =
+    budgetPct > 90
+      ? "linear-gradient(90deg, #b42318, #dc2626)"
+      : budgetPct > 70
+        ? "linear-gradient(90deg, #d97706, #f59e0b)"
+        : `linear-gradient(90deg, ${REPORT_COLORS.primary}, ${REPORT_COLORS.accent})`;
+
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Toolbar */}
       <div className="sticky top-0 z-10 bg-white border-b shadow-sm px-6 py-3 flex items-center justify-between no-print">
         <div className="flex items-center gap-3">
           <Button
@@ -142,293 +164,221 @@ export default function ProjectReportPage() {
           <h1 className="text-lg font-semibold">Izvještaj projekta</h1>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDownloadPdf}
-            disabled={downloading}
-          >
-            {downloading ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="mr-1 h-4 w-4" />
-            )}
-            PDF
-          </Button>
-          <Button size="sm" onClick={() => window.print()}>
+          <DownloadPdfButton onClick={handleDownloadPdf} downloading={downloading} />
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="mr-1 h-4 w-4" /> Ispis
           </Button>
         </div>
       </div>
 
-      {/* ═══════════════════ REPORT CONTENT ═══════════════════ */}
-      <div
-        className="max-w-[800px] mx-auto bg-white"
-        style={{
-          fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
-        }}
-      >
-        {/* Header band */}
-        <div className="bg-slate-800 text-white px-8 py-6">
-          <div className="flex items-end justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-300 mb-1">
-                Riforma — Izvještaj projekta
-              </p>
-              <h1 className="text-[22px] font-bold tracking-tight">
-                {project.name}
-              </h1>
-              <div className="flex items-center gap-2 mt-2">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full"
-                  style={{
-                    backgroundColor: STATUS_DOT[project.status] || "#94a3b8",
-                  }}
-                />
-                <span className="text-sm font-medium">
-                  {STATUS_LABELS[project.status] || project.status}
-                </span>
-              </div>
-            </div>
-            <div className="text-right text-sm text-slate-300">
-              <p>Datum izvještaja</p>
-              <p className="text-white font-semibold">{reportDate}</p>
-            </div>
+      <div className="max-w-[1000px] mx-auto p-6 space-y-2">
+        <ReportHeader
+          eyebrow="Izvještaj projekta"
+          title={project.name}
+          subtitle={
+            <span className="inline-flex items-center gap-2">
+              <StatusPill tone={STATUS_TONE[project.status] || "neutral"}>
+                {STATUS_LABELS[project.status] || project.status}
+              </StatusPill>
+            </span>
+          }
+          metaLabel="Datum izvještaja"
+          metaValue={reportDate}
+        />
+
+        <SectionTitle>Budžet i potrošnja</SectionTitle>
+        <KpiGrid>
+          <KpiCard label="Budžet" value={formatCurrency(budget)} />
+          <KpiCard
+            variant={budgetPct > 90 ? "default" : "info"}
+            label="Potrošeno"
+            value={formatCurrency(spent)}
+            sub={`${budgetPct} % budžeta`}
+          />
+          <KpiCard
+            variant={remaining < 0 ? "default" : "accent"}
+            label="Preostalo"
+            value={formatCurrency(remaining)}
+          />
+          <KpiCard
+            label="Faze"
+            value={`${completedPhases} / ${phases.length || 0}`}
+            sub={`${phasePct} % završeno`}
+          />
+        </KpiGrid>
+
+        <div className="mt-4">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Iskorištenost budžeta
+            </span>
+            <span className="text-sm font-bold">{budgetPct} %</span>
+          </div>
+          <div className="h-3 bg-[#0F5E4D]/10 rounded-sm overflow-hidden">
+            <div
+              className="h-full"
+              style={{
+                width: `${Math.min(100, budgetPct)}%`,
+                background: barGradient,
+              }}
+            />
           </div>
         </div>
 
-        <div className="px-8 py-8">
-          {/* KPIs */}
-          <div className="grid grid-cols-3 gap-4 mb-8">
-            <div className="border border-slate-200 rounded p-4">
-              <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wide">
-                Budžet
-              </p>
-              <p className="text-xl font-bold mt-1">{formatCurrency(budget)}</p>
+        {project.description && (
+          <>
+            <SectionTitle>Opis projekta</SectionTitle>
+            <div className="rounded-md bg-[#0F5E4D]/5 border-l-[3px] border-[#00C08B] px-5 py-4 text-sm leading-relaxed whitespace-pre-wrap">
+              {project.description}
             </div>
-            <div className="border border-slate-200 rounded p-4">
-              <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wide">
-                Potrošeno
-              </p>
-              <p
-                className={`text-xl font-bold mt-1 ${budgetPct > 90 ? "text-red-700" : budgetPct > 70 ? "text-amber-700" : "text-slate-900"}`}
-              >
-                {formatCurrency(spent)}
-              </p>
-              <p className="text-[10px] text-slate-400 mt-0.5">
-                {budgetPct}% budžeta
-              </p>
-            </div>
-            <div className="border border-slate-200 rounded p-4">
-              <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wide">
-                Preostalo
-              </p>
-              <p
-                className={`text-xl font-bold mt-1 ${remaining < 0 ? "text-red-700" : "text-emerald-700"}`}
-              >
-                {formatCurrency(remaining)}
-              </p>
-            </div>
-          </div>
+          </>
+        )}
 
-          {/* Budget bar */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between text-xs mb-1">
-              <span className="text-slate-500 font-semibold">
-                Iskorištenost budžeta
-              </span>
-              <span className="font-bold">{budgetPct}%</span>
-            </div>
-            <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+        {phases.length > 0 && (
+          <>
+            <SectionTitle
+              hint={`${completedPhases}/${phases.length} završeno (${phasePct} %)`}
+            >
+              Faze realizacije
+            </SectionTitle>
+            <div className="h-2 bg-[#0F5E4D]/10 rounded-sm overflow-hidden mb-3">
               <div
-                className={`h-full rounded-full transition-all ${budgetPct > 90 ? "bg-red-500" : budgetPct > 70 ? "bg-amber-500" : "bg-emerald-500"}`}
-                style={{ width: `${Math.min(budgetPct, 100)}%` }}
+                className="h-full"
+                style={{
+                  width: `${phasePct}%`,
+                  background: `linear-gradient(90deg, ${REPORT_COLORS.primary}, ${REPORT_COLORS.accent})`,
+                }}
               />
             </div>
-          </div>
-
-          {/* Description */}
-          {project.description && (
-            <div className="mb-8">
-              <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2 border-b border-slate-200 pb-1">
-                Opis projekta
-              </h3>
-              <p className="text-sm text-slate-700 leading-relaxed">
-                {project.description}
-              </p>
-            </div>
-          )}
-
-          {/* Phases */}
-          {phases.length > 0 && (
-            <div className="mb-8">
-              <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-                Faze realizacije ({completedPhases}/{phases.length} završeno —{" "}
-                {phasePct}%)
-              </h3>
-              <div className="h-2 bg-slate-100 rounded-full overflow-hidden mb-4">
-                <div
-                  className="h-full bg-emerald-500 rounded-full"
-                  style={{ width: `${phasePct}%` }}
-                />
-              </div>
-              <table className="w-full border-collapse text-[11px]">
-                <thead>
-                  <tr className="bg-slate-800 text-white">
-                    <th className="text-left py-2 px-3 font-semibold">Faza</th>
-                    <th className="text-left py-2 px-3 font-semibold">
-                      Početak
-                    </th>
-                    <th className="text-left py-2 px-3 font-semibold">
-                      Završetak
-                    </th>
-                    <th className="text-center py-2 px-3 font-semibold">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {phases.map((phase, idx) => (
-                    <tr
-                      key={phase.id || idx}
-                      className={`border-b border-slate-100 ${idx % 2 === 0 ? "bg-white" : "bg-slate-50/60"}`}
-                    >
-                      <td className="py-2 px-3 font-medium">{phase.name}</td>
-                      <td className="py-2 px-3 text-slate-600">
-                        {formatDate(phase.start_date)}
-                      </td>
-                      <td className="py-2 px-3 text-slate-600">
-                        {formatDate(phase.end_date)}
-                      </td>
-                      <td className="py-2 px-3 text-center">
-                        <span className="inline-flex items-center gap-1">
-                          <span
-                            className="inline-block h-2 w-2 rounded-full"
-                            style={{
-                              backgroundColor:
-                                PHASE_STATUS_DOT[phase.status] || "#94a3b8",
-                            }}
-                          />
-                          <span className="text-[10px] font-medium capitalize">
-                            {phase.status}
-                          </span>
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Transactions */}
-          {transactions.length > 0 && (
-            <div className="mb-8">
-              <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-                Financijski pregled
-              </h3>
-              <div className="grid grid-cols-3 gap-3 mb-4">
-                <div className="bg-emerald-50 border border-emerald-100 rounded p-3">
-                  <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                    Ukupni prihodi
-                  </p>
-                  <p className="text-sm font-bold text-emerald-700 mt-0.5">
-                    {formatCurrency(totalIncome)}
-                  </p>
-                </div>
-                <div className="bg-red-50 border border-red-100 rounded p-3">
-                  <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                    Ukupni rashodi
-                  </p>
-                  <p className="text-sm font-bold text-red-700 mt-0.5">
-                    {formatCurrency(totalExpense)}
-                  </p>
-                </div>
-                <div className="bg-slate-50 border border-slate-100 rounded p-3">
-                  <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                    Neto
-                  </p>
-                  <p
-                    className={`text-sm font-bold mt-0.5 ${totalIncome - totalExpense >= 0 ? "text-emerald-700" : "text-red-700"}`}
+            <DataTable>
+              <DataTableHead>
+                <tr>
+                  <th className="text-left px-3 py-2">Faza</th>
+                  <th className="text-left px-3 py-2">Početak</th>
+                  <th className="text-left px-3 py-2">Završetak</th>
+                  <th className="text-left px-3 py-2">Status</th>
+                </tr>
+              </DataTableHead>
+              <tbody>
+                {phases.map((p, i) => (
+                  <tr
+                    key={p.id || i}
+                    className={`border-t border-[#0F5E4D]/10 ${i % 2 === 1 ? "bg-[#0F5E4D]/[0.02]" : ""}`}
                   >
-                    {formatCurrency(totalIncome - totalExpense)}
-                  </p>
-                </div>
-              </div>
-              <table className="w-full border-collapse text-[11px]">
-                <thead>
-                  <tr className="bg-slate-800 text-white">
-                    <th className="text-left py-2 px-3 font-semibold">Datum</th>
-                    <th className="text-left py-2 px-3 font-semibold">
-                      Kategorija
-                    </th>
-                    <th className="text-left py-2 px-3 font-semibold">Opis</th>
-                    <th className="text-right py-2 px-3 font-semibold">
-                      Iznos
-                    </th>
+                    <td className="px-3 py-2 font-semibold">{p.name}</td>
+                    <td className="px-3 py-2 tabular-nums">
+                      {formatDate(p.start_date)}
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">
+                      {formatDate(p.end_date)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <StatusPill tone={PHASE_TONE[p.status] || "neutral"}>
+                        {PHASE_LABEL[p.status] || p.status}
+                      </StatusPill>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {transactions.map((tx, idx) => (
-                    <tr
-                      key={idx}
-                      className={`border-b border-slate-100 ${idx % 2 === 0 ? "bg-white" : "bg-slate-50/60"}`}
-                    >
-                      <td className="py-1.5 px-3 text-slate-600">
-                        {formatDate(tx.date)}
-                      </td>
-                      <td className="py-1.5 px-3 capitalize">{tx.category}</td>
-                      <td className="py-1.5 px-3 text-slate-600">
-                        {tx.description}
-                      </td>
-                      <td
-                        className={`py-1.5 px-3 text-right font-semibold ${tx.type === "income" ? "text-emerald-700" : "text-red-700"}`}
-                      >
-                        {tx.type === "income" ? "+" : "−"}
-                        {formatCurrency(tx.amount)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Documents */}
-          {documents.length > 0 && (
-            <div className="mb-8">
-              <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-                Pravna dokumentacija
-              </h3>
-              <div className="grid grid-cols-2 gap-2">
-                {documents.map((doc, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between border border-slate-200 rounded p-2.5 text-[11px]"
-                  >
-                    <span className="font-medium truncate">
-                      {doc.name}{" "}
-                      <span className="text-slate-400">({doc.type})</span>
-                    </span>
-                    <span
-                      className={`inline-flex items-center gap-1 text-[10px] font-medium ${doc.status === "approved" ? "text-emerald-700" : "text-slate-500"}`}
-                    >
-                      <span
-                        className={`inline-block h-2 w-2 rounded-full ${doc.status === "approved" ? "bg-emerald-500" : "bg-slate-300"}`}
-                      />
-                      {doc.status}
-                    </span>
-                  </div>
                 ))}
-              </div>
-            </div>
-          )}
+              </tbody>
+            </DataTable>
+          </>
+        )}
 
-          {/* Footer */}
-          <div className="mt-8 pt-3 border-t border-slate-200 flex justify-between text-[10px] text-slate-400">
-            <span>Riforma — Sustav za upravljanje nekretninama</span>
-            <span>Generirano: {new Date().toLocaleString("hr-HR")}</span>
-          </div>
+        {transactions.length > 0 && (
+          <>
+            <SectionTitle>Financijski pregled</SectionTitle>
+            <KpiGrid>
+              <KpiCard
+                variant="positive"
+                label="Ukupni prihodi"
+                value={formatCurrency(totalIncome)}
+              />
+              <KpiCard
+                label="Ukupni rashodi"
+                value={formatCurrency(totalExpense)}
+              />
+              <KpiCard
+                variant={netAmount < 0 ? "default" : "accent"}
+                label="Neto"
+                value={formatCurrency(netAmount)}
+              />
+              <KpiCard
+                label="Transakcija"
+                value={transactions.length}
+                sub="ukupno"
+              />
+            </KpiGrid>
+
+            <div className="mt-4">
+              <DataTable>
+                <DataTableHead>
+                  <tr>
+                    <th className="text-left px-3 py-2">Datum</th>
+                    <th className="text-left px-3 py-2">Kategorija</th>
+                    <th className="text-left px-3 py-2">Opis</th>
+                    <th className="text-right px-3 py-2">Iznos</th>
+                  </tr>
+                </DataTableHead>
+                <tbody>
+                  {transactions.map((t, i) => (
+                    <tr
+                      key={t.id || i}
+                      className={`border-t border-[#0F5E4D]/10 ${i % 2 === 1 ? "bg-[#0F5E4D]/[0.02]" : ""}`}
+                    >
+                      <td className="px-3 py-2 tabular-nums">
+                        {formatDate(t.date)}
+                      </td>
+                      <td className="px-3 py-2 capitalize">
+                        {t.category || "—"}
+                      </td>
+                      <td className="px-3 py-2">{t.description || "—"}</td>
+                      <td
+                        className={`px-3 py-2 text-right tabular-nums font-semibold ${
+                          t.type === "income"
+                            ? "text-[#0f6a44]"
+                            : "text-[#b42318]"
+                        }`}
+                      >
+                        {t.type === "income" ? "+" : "−"}
+                        {formatCurrency(t.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+            </div>
+          </>
+        )}
+
+        {documents.length > 0 && (
+          <>
+            <SectionTitle>Pravna dokumentacija</SectionTitle>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {documents.map((doc, i) => (
+                <div
+                  key={doc.id || i}
+                  className="flex items-center justify-between bg-white border border-[#0F5E4D]/15 rounded-md px-4 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <div className="font-semibold truncate">{doc.name}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {doc.type || "—"}
+                    </div>
+                  </div>
+                  <StatusPill
+                    tone={doc.status === "approved" ? "positive" : "neutral"}
+                  >
+                    {doc.status || "—"}
+                  </StatusPill>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div className="pt-4 mt-6 border-t border-[#0F5E4D]/10 flex justify-between text-[10px] text-muted-foreground">
+          <span>Riforma — Sustav za upravljanje nekretninama</span>
+          <span>Generirano: {new Date().toLocaleString("hr-HR")}</span>
         </div>
       </div>
 
@@ -436,9 +386,7 @@ export default function ProjectReportPage() {
         @media print {
           .no-print { display: none !important; }
           body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          table { width: 100%; }
-          tr { page-break-inside: avoid; }
-          @page { size: A4; margin: 15mm; }
+          @page { size: A4 portrait; margin: 12mm; }
         }
       `}</style>
     </div>

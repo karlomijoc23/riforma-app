@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { api } from "../../shared/api";
 import {
   downloadPdfFromResponse,
@@ -7,26 +7,27 @@ import {
 import {
   formatCurrency,
   formatArea,
-  formatPercentage,
   formatPropertyType,
 } from "../../shared/formatters";
 import {
   Loader2,
   Printer,
-  Download,
   ArrowLeft,
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { toast } from "../../components/ui/sonner";
-
-const TYPE_DOT = {
-  poslovna_zgrada: "#3b82f6",
-  stan: "#a855f7",
-  zemljiste: "#10b981",
-  ostalo: "#6b7280",
-};
+import {
+  ReportHeader,
+  SectionTitle,
+  KpiGrid,
+  KpiCard,
+  DataTable,
+  DataTableHead,
+  DownloadPdfButton,
+  REPORT_COLORS,
+} from "../../shared/reportUI";
 
 const PropertyReport = () => {
   const navigate = useNavigate();
@@ -63,7 +64,7 @@ const PropertyReport = () => {
           contractsByProperty.get(pid).push(c);
         });
 
-        const enrichedProperties = (propertiesRes.data || [])
+        const enriched = (propertiesRes.data || [])
           .map((p) => {
             const pid = String(p.id);
             const propUnits = unitsByProperty.get(pid) || [];
@@ -76,13 +77,14 @@ const PropertyReport = () => {
             const occupiedUnits = propUnits.filter(
               (u) => u.status === "iznajmljeno",
             ).length;
-            // Nekretnina bez jedinica — popunjenost = ima li aktivan ugovor
             const occupancyPercent =
               totalUnits > 0
                 ? Math.round((occupiedUnits / totalUnits) * 100)
                 : propContracts.length > 0
                   ? 100
                   : 0;
+            const market = parseFloat(p.trzisna_vrijednost) || 0;
+            const roi = market > 0 ? (monthlyIncome * 12 * 100) / market : null;
             return {
               ...p,
               monthlyIncome,
@@ -90,18 +92,17 @@ const PropertyReport = () => {
               occupiedUnits,
               totalUnits,
               activeContractCount: propContracts.length,
-              trzisna_vrijednost_num: parseFloat(p.trzisna_vrijednost) || 0,
-              povrsina_num: parseFloat(p.povrsina) || 0,
+              trzisnaVrijednost: market,
+              povrsina: parseFloat(p.povrsina) || 0,
+              roi,
             };
           })
           .sort((a, b) => {
-            const valueDiff =
-              b.trzisna_vrijednost_num - a.trzisna_vrijednost_num;
-            if (valueDiff !== 0) return valueDiff;
-            return b.monthlyIncome - a.monthlyIncome;
+            const v = b.trzisnaVrijednost - a.trzisnaVrijednost;
+            return v !== 0 ? v : b.monthlyIncome - a.monthlyIncome;
           });
 
-        setProperties(enrichedProperties);
+        setProperties(enriched);
       } catch (err) {
         console.error("Failed to fetch property report data", err);
         setError("Greška pri učitavanju podataka izvještaja");
@@ -120,7 +121,6 @@ const PropertyReport = () => {
       downloadPdfFromResponse(res, "riforma-izvjestaj-portfelja.pdf");
       toast.success("PDF preuzet.");
     } catch (err) {
-      console.error("PDF generation failed", err);
       const detail = await extractBlobErrorDetail(err);
       toast.error(detail);
     } finally {
@@ -128,43 +128,57 @@ const PropertyReport = () => {
     }
   }, []);
 
-  // --- Computed metrics ---
-  const totalProperties = properties.length;
-  const totalArea = properties.reduce((sum, p) => sum + p.povrsina_num, 0);
-  const avgOccupancy =
-    totalProperties > 0
-      ? properties.reduce((sum, p) => sum + p.occupancyPercent, 0) /
-        totalProperties
-      : 0;
-  const totalValue = properties.reduce(
-    (sum, p) => sum + p.trzisna_vrijednost_num,
-    0,
-  );
-  const totalMonthlyIncome = properties.reduce(
-    (sum, p) => sum + p.monthlyIncome,
-    0,
-  );
-  const totalAnnualIncome = totalMonthlyIncome * 12;
-  const avgYield = totalValue > 0 ? (totalAnnualIncome / totalValue) * 100 : 0;
-  const totalActiveContracts = properties.reduce(
-    (sum, p) => sum + p.activeContractCount,
-    0,
-  );
-  const totalUnitsAll = properties.reduce((sum, p) => sum + p.totalUnits, 0);
-  const totalOccupiedAll = properties.reduce(
-    (sum, p) => sum + p.occupiedUnits,
-    0,
-  );
+  const totals = useMemo(() => {
+    const totalArea = properties.reduce((s, p) => s + p.povrsina, 0);
+    const totalValue = properties.reduce((s, p) => s + p.trzisnaVrijednost, 0);
+    const monthly = properties.reduce((s, p) => s + p.monthlyIncome, 0);
+    const totalUnits = properties.reduce((s, p) => s + p.totalUnits, 0);
+    const occupiedUnits = properties.reduce((s, p) => s + p.occupiedUnits, 0);
+    const totalActive = properties.reduce(
+      (s, p) => s + p.activeContractCount,
+      0,
+    );
+    const annual = monthly * 12;
+    const portfolioRoi = totalValue > 0 ? (annual * 100) / totalValue : 0;
+    const avgOccupancy =
+      properties.length > 0
+        ? properties.reduce((s, p) => s + p.occupancyPercent, 0) /
+          properties.length
+        : 0;
 
-  // By type
-  const typeSummary = {};
-  properties.forEach((p) => {
-    const t = p.vrsta || "ostalo";
-    if (!typeSummary[t]) typeSummary[t] = { count: 0, value: 0, income: 0 };
-    typeSummary[t].count++;
-    typeSummary[t].value += p.trzisna_vrijednost_num;
-    typeSummary[t].income += p.monthlyIncome;
-  });
+    // Vrste portfelja (struktura)
+    const typeMap = new Map();
+    properties.forEach((p) => {
+      const key = p.vrsta || "ostalo";
+      const b = typeMap.get(key) || {
+        key,
+        label: formatPropertyType(key),
+        count: 0,
+        value: 0,
+        income: 0,
+      };
+      b.count += 1;
+      b.value += p.trzisnaVrijednost;
+      b.income += p.monthlyIncome;
+      typeMap.set(key, b);
+    });
+    const typeSummary = [...typeMap.values()].sort(
+      (a, b) => b.value - a.value,
+    );
+
+    return {
+      totalArea,
+      totalValue,
+      monthly,
+      annual,
+      totalUnits,
+      occupiedUnits,
+      totalActive,
+      avgOccupancy,
+      portfolioRoi,
+      typeSummary,
+    };
+  }, [properties]);
 
   if (loading) {
     return (
@@ -194,7 +208,6 @@ const PropertyReport = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Toolbar */}
       <div className="sticky top-0 z-10 bg-white border-b shadow-sm px-6 py-3 flex items-center justify-between no-print">
         <div className="flex items-center gap-3">
           <Button
@@ -207,332 +220,175 @@ const PropertyReport = () => {
           <h1 className="text-lg font-semibold">Izvještaj portfelja</h1>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDownloadPdf}
-            disabled={downloading}
-          >
-            {downloading ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="mr-1 h-4 w-4" />
-            )}
-            PDF
-          </Button>
-          <Button size="sm" onClick={() => window.print()}>
+          <DownloadPdfButton onClick={handleDownloadPdf} downloading={downloading} />
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="mr-1 h-4 w-4" /> Ispis
           </Button>
         </div>
       </div>
 
-      {/* ═══════════════════ REPORT CONTENT ═══════════════════ */}
-      <div
-        className="max-w-[1100px] mx-auto bg-white"
-        style={{
-          fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
-        }}
-      >
-        {/* Header band */}
-        <div className="bg-slate-800 text-white px-10 py-6">
-          <div className="flex items-end justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-300 mb-1">
-                Riforma
-              </p>
-              <h1 className="text-[22px] font-bold tracking-tight">
-                Izvještaj portfelja nekretnina
-              </h1>
-            </div>
-            <div className="text-right text-sm text-slate-300">
-              <p>Datum izvještaja</p>
-              <p className="text-white font-semibold">{reportDate}</p>
-            </div>
-          </div>
-        </div>
+      <div className="max-w-[1200px] mx-auto p-6 space-y-2">
+        <ReportHeader
+          eyebrow="Izvještaj portfelja"
+          title="Pregled nekretnina"
+          subtitle="Konsolidirani prikaz vrijednosti, popunjenosti i prihoda po objektu."
+          metaLabel="Generirano"
+          metaValue={reportDate}
+        />
 
-        <div className="px-10 py-8">
-          {/* KPI row */}
-          <div className="grid grid-cols-4 gap-3 mb-6">
-            {[
-              { label: "Nekretnina", value: totalProperties },
-              { label: "Ukupna površina", value: formatArea(totalArea) },
-              { label: "Ukupna vrijednost", value: formatCurrency(totalValue) },
-              { label: "Aktivnih ugovora", value: totalActiveContracts },
-            ].map((kpi, i) => (
-              <div key={i} className="border border-slate-200 rounded p-3">
-                <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wide">
-                  {kpi.label}
-                </p>
-                <p className="text-lg font-bold mt-0.5">{kpi.value}</p>
-              </div>
-            ))}
-          </div>
+        <SectionTitle>Ključni pokazatelji</SectionTitle>
+        <KpiGrid>
+          <KpiCard
+            variant="accent"
+            label="Vrijednost portfelja"
+            value={formatCurrency(totals.totalValue)}
+            sub={`${properties.length} nekretnina · ${formatArea(totals.totalArea)}`}
+          />
+          <KpiCard
+            variant="info"
+            label="Mjesečni prihod"
+            value={formatCurrency(totals.monthly)}
+            sub={`Godišnje ${formatCurrency(totals.annual)}`}
+          />
+          <KpiCard
+            variant="positive"
+            label="Sveukupni ROI"
+            value={`${totals.portfolioRoi.toFixed(1)} %`}
+            sub="godišnji prihod / vrijednost portfelja"
+          />
+          <KpiCard
+            label="Aktivni ugovori"
+            value={totals.totalActive}
+            sub={`${totals.occupiedUnits} / ${totals.totalUnits} jedinica · zauzeće ${totals.avgOccupancy.toFixed(0)} %`}
+          />
+        </KpiGrid>
 
-          {/* Financial highlights */}
-          <div className="grid grid-cols-4 gap-3 mb-8">
-            <div className="bg-emerald-50 border border-emerald-100 rounded p-3">
-              <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                Mjesečni prihod
-              </p>
-              <p className="text-lg font-bold text-emerald-700 mt-0.5">
-                {formatCurrency(totalMonthlyIncome)}
-              </p>
-            </div>
-            <div className="bg-emerald-50 border border-emerald-100 rounded p-3">
-              <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                Godišnji prihod
-              </p>
-              <p className="text-lg font-bold text-emerald-700 mt-0.5">
-                {formatCurrency(totalAnnualIncome)}
-              </p>
-            </div>
-            <div className="bg-blue-50 border border-blue-100 rounded p-3">
-              <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                Prosječni prinos
-              </p>
-              <p className="text-lg font-bold text-blue-700 mt-0.5">
-                {formatPercentage(avgYield)}
-              </p>
-            </div>
-            <div className="bg-blue-50 border border-blue-100 rounded p-3">
-              <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                Zakupljenost
-              </p>
-              <p className="text-lg font-bold text-blue-700 mt-0.5">
-                {formatPercentage(avgOccupancy)}
-                <span className="text-xs font-normal text-slate-500 ml-1">
-                  ({totalOccupiedAll}/{totalUnitsAll})
-                </span>
-              </p>
-            </div>
-          </div>
+        {totals.typeSummary.length > 0 && (
+          <>
+            <SectionTitle>Struktura po vrsti</SectionTitle>
+            <DataTable>
+              <DataTableHead>
+                <tr>
+                  <th className="text-left px-3 py-2">Vrsta nekretnine</th>
+                  <th className="text-right px-3 py-2">Broj objekata</th>
+                  <th className="text-right px-3 py-2">Tržišna vrijednost</th>
+                  <th className="text-right px-3 py-2">Mjesečni prihod</th>
+                </tr>
+              </DataTableHead>
+              <tbody>
+                {totals.typeSummary.map((t) => (
+                  <tr key={t.key} className="border-t border-[#0F5E4D]/10">
+                    <td className="px-3 py-2 font-semibold">{t.label}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {t.count}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                      {formatCurrency(t.value)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {formatCurrency(t.income)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </DataTable>
+          </>
+        )}
 
-          {/* Portfolio by type */}
-          <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-            Portfelj po vrsti nekretnine
-          </h3>
-          <div className="grid grid-cols-4 gap-3 mb-8">
-            {Object.entries(typeSummary).map(([type, data]) => (
-              <div key={type} className="border border-slate-200 rounded p-3">
-                <div className="flex items-center gap-1.5 mb-2">
-                  <span
-                    className="inline-block h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: TYPE_DOT[type] || "#6b7280" }}
-                  />
-                  <span className="text-xs font-semibold">
-                    {formatPropertyType(type)}
-                  </span>
-                </div>
-                <div className="space-y-1 text-[11px]">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Broj</span>
-                    <span className="font-semibold">{data.count}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Vrijednost</span>
-                    <span className="font-semibold">
-                      {formatCurrency(data.value)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Mj. prihod</span>
-                    <span className="font-semibold text-emerald-700">
-                      {formatCurrency(data.income)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Per-property cards */}
-          <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-3 border-b border-slate-200 pb-1">
-            Pregled po nekretnini
-          </h3>
-          <div className="space-y-2 mb-8">
-            {properties.map((p) => (
-              <div
+        <SectionTitle>Pregled po nekretnini</SectionTitle>
+        <DataTable>
+          <DataTableHead>
+            <tr>
+              <th className="text-left px-3 py-2">Nekretnina</th>
+              <th className="text-left px-3 py-2">Vrsta</th>
+              <th className="text-right px-3 py-2">Površina</th>
+              <th className="text-right px-3 py-2">Tržišna vrijednost</th>
+              <th className="text-right px-3 py-2">Mj. prihod</th>
+              <th className="text-left px-3 py-2 w-[160px]">Popunjenost</th>
+              <th className="text-right px-3 py-2">ROI</th>
+              <th className="text-right px-3 py-2">Ugovori</th>
+            </tr>
+          </DataTableHead>
+          <tbody>
+            {properties.map((p, i) => (
+              <tr
                 key={p.id}
-                className="border border-slate-200 rounded p-3 flex items-center gap-4"
+                className={`border-t border-[#0F5E4D]/10 ${i % 2 === 1 ? "bg-[#0F5E4D]/[0.02]" : ""}`}
                 style={{ pageBreakInside: "avoid" }}
               >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span
-                      className="inline-block h-2.5 w-2.5 rounded-full shrink-0"
+                <td className="px-3 py-2">
+                  <div className="font-semibold">{p.naziv}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {p.adresa}
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-[12px] text-muted-foreground">
+                  {formatPropertyType(p.vrsta)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {formatArea(p.povrsina)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                  {formatCurrency(p.trzisnaVrijednost)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {formatCurrency(p.monthlyIncome)}
+                </td>
+                <td className="px-3 py-2">
+                  <div className="text-[10px] text-muted-foreground mb-1">
+                    {p.occupiedUnits} / {p.totalUnits || "—"} ·{" "}
+                    {p.occupancyPercent} %
+                  </div>
+                  <div className="h-1.5 bg-[#0F5E4D]/10 rounded-sm overflow-hidden">
+                    <div
+                      className="h-full"
                       style={{
-                        backgroundColor: TYPE_DOT[p.vrsta] || "#6b7280",
+                        width: `${Math.min(100, Math.max(0, p.occupancyPercent))}%`,
+                        background: `linear-gradient(90deg, ${REPORT_COLORS.primary}, ${REPORT_COLORS.accent})`,
                       }}
                     />
-                    <span className="font-semibold text-[12px] truncate">
-                      {p.naziv}
-                    </span>
                   </div>
-                  <p className="text-[10px] text-slate-500 truncate pl-4">
-                    {p.adresa || "—"}
-                  </p>
-                </div>
-                <div className="grid grid-cols-5 gap-4 text-[11px] shrink-0">
-                  <div className="text-center">
-                    <p className="text-[9px] text-slate-400 uppercase">
-                      Površina
-                    </p>
-                    <p className="font-semibold">{formatArea(p.povrsina)}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[9px] text-slate-400 uppercase">
-                      Vrijednost
-                    </p>
-                    <p className="font-semibold">
-                      {formatCurrency(p.trzisna_vrijednost)}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[9px] text-slate-400 uppercase">
-                      Mj. prihod
-                    </p>
-                    <p className="font-semibold text-emerald-700">
-                      {formatCurrency(p.monthlyIncome)}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[9px] text-slate-400 uppercase">
-                      Zakupljenost
-                    </p>
-                    <p
-                      className={`font-semibold ${p.occupancyPercent >= 80 ? "text-emerald-700" : p.occupancyPercent >= 50 ? "text-amber-700" : "text-red-600"}`}
-                    >
-                      {p.occupancyPercent}%{" "}
-                      <span className="text-slate-400 font-normal">
-                        ({p.occupiedUnits}/{p.totalUnits})
-                      </span>
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[9px] text-slate-400 uppercase">
-                      Ugovori
-                    </p>
-                    <p className="font-semibold">{p.activeContractCount}</p>
-                  </div>
-                </div>
-              </div>
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                  {p.roi !== null ? `${p.roi.toFixed(1)} %` : "—"}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {p.activeContractCount}
+                </td>
+              </tr>
             ))}
-            {properties.length === 0 && (
-              <p className="text-xs text-slate-400 text-center py-4">
-                Nema nekretnina u portfelju.
-              </p>
-            )}
-          </div>
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-[#0F5E4D] bg-[#0F5E4D]/5 font-bold text-[#0F5E4D]">
+              <td className="px-3 py-2">
+                Ukupno · {properties.length} nekretnina
+              </td>
+              <td />
+              <td className="px-3 py-2 text-right tabular-nums">
+                {formatArea(totals.totalArea)}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {formatCurrency(totals.totalValue)}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {formatCurrency(totals.monthly)}
+              </td>
+              <td className="px-3 py-2 text-[12px]">
+                {totals.avgOccupancy.toFixed(0)} %
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {totals.portfolioRoi.toFixed(1)} %
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {totals.totalActive}
+              </td>
+            </tr>
+          </tfoot>
+        </DataTable>
 
-          {/* Summary table */}
-          <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2 border-b border-slate-200 pb-1">
-            Detaljna tablica portfelja
-          </h3>
-          <table className="w-full border-collapse text-[11px]">
-            <thead>
-              <tr className="bg-slate-800 text-white">
-                <th className="text-left py-2 px-2 font-semibold">
-                  Nekretnina
-                </th>
-                <th className="text-left py-2 px-2 font-semibold">Adresa</th>
-                <th className="text-center py-2 px-2 font-semibold">Vrsta</th>
-                <th className="text-right py-2 px-2 font-semibold">Površina</th>
-                <th className="text-right py-2 px-2 font-semibold">
-                  Vrijednost
-                </th>
-                <th className="text-right py-2 px-2 font-semibold">
-                  Mj. prihod
-                </th>
-                <th className="text-center py-2 px-2 font-semibold">
-                  Zakupljenost
-                </th>
-                <th className="text-center py-2 px-2 font-semibold">Ugovori</th>
-              </tr>
-            </thead>
-            <tbody>
-              {properties.map((p, i) => (
-                <tr
-                  key={p.id}
-                  className={`border-b border-slate-100 ${i % 2 === 0 ? "bg-white" : "bg-slate-50/60"}`}
-                  style={{ pageBreakInside: "avoid" }}
-                >
-                  <td className="py-1.5 px-2 font-medium">{p.naziv}</td>
-                  <td className="py-1.5 px-2 text-slate-600">
-                    {p.adresa || "—"}
-                  </td>
-                  <td className="py-1.5 px-2 text-center">
-                    <span className="inline-flex items-center gap-1">
-                      <span
-                        className="inline-block h-2 w-2 rounded-full"
-                        style={{
-                          backgroundColor: TYPE_DOT[p.vrsta] || "#6b7280",
-                        }}
-                      />
-                      <span className="text-[10px]">
-                        {formatPropertyType(p.vrsta)}
-                      </span>
-                    </span>
-                  </td>
-                  <td className="py-1.5 px-2 text-right">
-                    {formatArea(p.povrsina)}
-                  </td>
-                  <td className="py-1.5 px-2 text-right font-medium">
-                    {formatCurrency(p.trzisna_vrijednost)}
-                  </td>
-                  <td className="py-1.5 px-2 text-right text-emerald-700 font-medium">
-                    {formatCurrency(p.monthlyIncome)}
-                  </td>
-                  <td className="py-1.5 px-2 text-center">
-                    <span
-                      className={
-                        p.occupancyPercent >= 80
-                          ? "text-emerald-700 font-medium"
-                          : p.occupancyPercent >= 50
-                            ? "text-amber-700 font-medium"
-                            : "text-red-600 font-medium"
-                      }
-                    >
-                      {p.occupancyPercent}%
-                    </span>
-                  </td>
-                  <td className="py-1.5 px-2 text-center">
-                    {p.activeContractCount}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-slate-800 text-white font-semibold">
-                <td className="py-2 px-2">UKUPNO</td>
-                <td className="py-2 px-2" />
-                <td className="py-2 px-2 text-center text-[10px]">
-                  {totalProperties} nekr.
-                </td>
-                <td className="py-2 px-2 text-right">
-                  {formatArea(totalArea)}
-                </td>
-                <td className="py-2 px-2 text-right">
-                  {formatCurrency(totalValue)}
-                </td>
-                <td className="py-2 px-2 text-right">
-                  {formatCurrency(totalMonthlyIncome)}
-                </td>
-                <td className="py-2 px-2 text-center">
-                  {formatPercentage(avgOccupancy)}
-                </td>
-                <td className="py-2 px-2 text-center">
-                  {totalActiveContracts}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-
-          {/* Footer */}
-          <div className="mt-8 pt-3 border-t border-slate-200 flex justify-between text-[10px] text-slate-400">
-            <span>Riforma — Sustav za upravljanje nekretninama</span>
-            <span>Generirano: {new Date().toLocaleString("hr-HR")}</span>
-          </div>
+        <div className="pt-4 border-t border-[#0F5E4D]/10 flex justify-between text-[10px] text-muted-foreground">
+          <span>Riforma — Sustav za upravljanje nekretninama</span>
+          <span>Generirano: {new Date().toLocaleString("hr-HR")}</span>
         </div>
       </div>
 
@@ -540,8 +396,6 @@ const PropertyReport = () => {
         @media print {
           .no-print { display: none !important; }
           body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          table { width: 100%; }
-          tr { page-break-inside: avoid; }
           @page { size: A4 landscape; margin: 10mm; }
         }
       `}</style>
