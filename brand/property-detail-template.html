@@ -227,7 +227,6 @@
           <th class="num">Mj. zakupnina</th>
           <th class="num">€ / m²</th>
           <th class="num">vs nekretnina</th>
-          <th>Status</th>
         </tr>
       </thead>
       <tbody>
@@ -248,7 +247,6 @@
               {% endif %}
             {% else %}—{% endif %}
           </td>
-          <td><span class="pill pill-{{ c.status_pill_class }}">{{ c.status_label }}</span></td>
         </tr>
         {% endfor %}
       </tbody>
