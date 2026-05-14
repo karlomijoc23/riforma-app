@@ -340,7 +340,6 @@
       {% if revenue_by_property %}
       <div>
         <h2 class="section-title">Top 5 prihoda po nekretnini</h2>
-        {% set rev_max = revenue_by_property[0].amount or 1 %}
         <div class="rank-list">
           {% for row in revenue_by_property %}
           <div class="rank-list__row">
@@ -348,7 +347,7 @@
             <div class="rank-list__body">
               <div class="rank-list__name">{{ row.name }}</div>
               <div class="rank-list__bar">
-                <span style="width: {{ (row.amount / rev_max * 100) | round(0) }}%;"></span>
+                <span style="width: {{ row.bar_width }}%;"></span>
               </div>
             </div>
             <div class="rank-list__value">{{ row.amount | currency }}</div>
@@ -366,7 +365,6 @@
       {% if top_tenants %}
       <div>
         <h2 class="section-title">Top 5 zakupnika (mj. prihod)</h2>
-        {% set ten_max = top_tenants[0].rent or 1 %}
         <div class="rank-list">
           {% for row in top_tenants %}
           <div class="rank-list__row">
@@ -375,7 +373,7 @@
               <div class="rank-list__name">{{ row.name }}</div>
               <div class="rank-list__hint">{{ row.count }} ugovor{% if row.count != 1 %}a{% endif %}</div>
               <div class="rank-list__bar">
-                <span style="width: {{ (row.rent / ten_max * 100) | round(0) }}%;"></span>
+                <span style="width: {{ row.bar_width }}%;"></span>
               </div>
             </div>
             <div class="rank-list__value">{{ row.rent | currency }}</div>

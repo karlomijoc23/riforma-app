@@ -280,18 +280,35 @@ async def _build_context(
     # po prihodu. Pun popis svih ugovora ide u "Detaljan pregled ugovora"
     # koji namjerno NEMA cap.
     SUMMARY_LIMIT = 5
+    # Cast `v` u float — MariaDB asyncmy vrati Decimal za NUMERIC kolone,
+    # a Decimal kasnije puca u Jinja filteru `| round(0)`. Lokalno na
+    # SQLite-u je već float pa lokalni dev to ne uhvati.
     revenue_sorted = sorted(
-        [{"name": k, "amount": v} for k, v in revenue_by_prop.items()],
+        [{"name": k, "amount": float(v or 0)} for k, v in revenue_by_prop.items()],
         key=lambda r: -r["amount"],
     )
     revenue_list = revenue_sorted[:SUMMARY_LIMIT]
     revenue_overflow = max(0, len(revenue_sorted) - SUMMARY_LIMIT)
+    # Pre-compute integer bar widths (0–100) — template ih samo
+    # umetne. Time se izbjegava Jinja arithmetika na potencijalnim
+    # Decimal vrijednostima i `| round` filter.
+    rev_max = revenue_list[0]["amount"] if revenue_list else 0
+    for r in revenue_list:
+        r["bar_width"] = (
+            int(round(r["amount"] / rev_max * 100)) if rev_max > 0 else 0
+        )
 
     tenants_sorted = sorted(
-        tenant_buckets.values(), key=lambda r: -r["rent"]
+        ({**b, "rent": float(b.get("rent") or 0)} for b in tenant_buckets.values()),
+        key=lambda r: -r["rent"],
     )
     top_tenants = tenants_sorted[:SUMMARY_LIMIT]
     tenants_overflow = max(0, len(tenants_sorted) - SUMMARY_LIMIT)
+    ten_max = top_tenants[0]["rent"] if top_tenants else 0
+    for r in top_tenants:
+        r["bar_width"] = (
+            int(round(r["rent"] / ten_max * 100)) if ten_max > 0 else 0
+        )
 
     totals = {
         "count": total,
