@@ -25,7 +25,7 @@ from app.services.approval_service import (
 )
 from app.core.email import send_email
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 try:
     import anthropic
@@ -924,7 +924,9 @@ async def delete_racun(
 
 
 class PaymentBody(BaseModel):
-    iznos_uplate: float
+    # `gt=0` na Pydantic razini odbije 0 i negativne iznose s 422
+    # prije nego endpoint dođe do ručnog `<= 0` provjere.
+    iznos_uplate: float = Field(..., gt=0)
     datum_uplate: Optional[str] = None
     napomena: Optional[str] = None
 
@@ -946,8 +948,26 @@ async def record_payment(
     if not item:
         raise HTTPException(status_code=404, detail="Racun nije pronadjen")
 
+    # PaymentBody već radi `gt=0` validaciju, ali zadržimo ovo kao
+    # safety net za stara API klijenta koja možda zaobiđu schemu.
     if body.iznos_uplate <= 0:
         raise HTTPException(status_code=422, detail="Iznos uplate mora biti pozitivan")
+
+    # Spriječi overpayment — preplata nije prihvatljiva poslovno
+    # (računovođe traže credit note). Postojeće uplate + nova ne
+    # smije premašiti iznos računa za više od 1 centi tolerancije
+    # (zaokruživanje).
+    existing_paid = sum(float(p.get("iznos", 0)) for p in (item.payments or []))
+    bill_amount = float(item.iznos or 0)
+    if existing_paid + body.iznos_uplate > bill_amount + 0.01:
+        remaining = max(0.0, bill_amount - existing_paid)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Uplata premašuje preostali iznos računa. Preostalo za "
+                f"plaćanje: {remaining:.2f} EUR"
+            ),
+        )
 
     payment = {
         "id": str(uuid.uuid4()),
@@ -964,7 +984,6 @@ async def record_payment(
 
     # Calculate total paid
     total_paid = sum(float(p.get("iznos", 0)) for p in payments)
-    bill_amount = float(item.iznos or 0)
 
     # Auto-update payment status
     if total_paid >= bill_amount:

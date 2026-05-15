@@ -86,7 +86,18 @@ export const formatDate = (value) => {
   if (!value) {
     return "—";
   }
-  const date = new Date(value);
+  // Backend šalje datum-only stringove kao "2026-05-15". Bez explicit
+  // time JavaScript ih parsira kao UTC midnight, što hrvatske korisnike
+  // (UTC+1/+2) za par sati pomakne na prethodni dan. Detektiraj
+  // datum-only format pa interpretiraj kao local midnight da prikaz
+  // ostane stabilan bez obzira na timezone klijenta.
+  let date;
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [y, m, d] = value.split("-").map(Number);
+    date = new Date(y, m - 1, d);
+  } else {
+    date = new Date(value);
+  }
   if (Number.isNaN(date.getTime())) {
     return "—";
   }
@@ -97,7 +108,16 @@ export const formatContractDate = (value) => {
   if (!value) {
     return "—";
   }
-  const date = new Date(value);
+  // Vidi `formatDate` komentar — datum-only iz backend-a ide kroz local
+  // midnight kako bi se prikaz dana poklopio s onim što korisnik vidi
+  // u date pickeru, neovisno o timezone-u.
+  let date;
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [y, m, d] = value.split("-").map(Number);
+    date = new Date(y, m - 1, d);
+  } else {
+    date = new Date(value);
+  }
   if (Number.isNaN(date.getTime())) {
     return "—";
   }

@@ -145,7 +145,10 @@ export default function OglasDialog({ open, onOpenChange, oglas, onSaved }) {
     api
       .getNekretnine()
       .then((r) => setNekretnine(r.data?.items || r.data || []))
-      .catch(() => {});
+      .catch((err) => {
+        // Tihi fallback bi sakrio prazan dropdown — bar log za debug.
+        console.error("Greška pri učitavanju nekretnina za oglas:", err);
+      });
   }, [open]);
 
   // Reset form when dialog opens / oglas changes

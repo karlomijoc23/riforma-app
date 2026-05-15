@@ -166,6 +166,13 @@ class ListingUpdate(BaseModel):
             raise ValueError(f"status mora biti jedan od: {VALID_STATUSES}")
         return v
 
+    @field_validator("cijena", "cijena_po_m2", "povrsina_m2")
+    @classmethod
+    def validate_non_negative(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and v < 0:
+            raise ValueError("Vrijednost ne može biti negativna")
+        return v
+
 
 # ---------------------------------------------------------------------------
 # Pomoćne funkcije

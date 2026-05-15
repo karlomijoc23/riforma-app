@@ -81,9 +81,9 @@ class PropertyUnitCreate(BaseModel):
     oznaka: str = Field(max_length=100)
     naziv: str = Field(max_length=200)
     kat: Optional[str] = Field(default=None, max_length=100)
-    povrsina_m2: float = 0.0
+    povrsina_m2: float = Field(default=0.0, ge=0)
     status: PropertyUnitStatus = PropertyUnitStatus.DOSTUPNO
-    osnovna_zakupnina: Optional[float] = None
+    osnovna_zakupnina: Optional[float] = Field(default=None, ge=0)
     napomena: Optional[str] = Field(default=None, max_length=5000)
 
 
